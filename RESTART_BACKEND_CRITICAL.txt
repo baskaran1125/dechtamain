@@ -1,0 +1,67 @@
+# 🚨 CRITICAL BUG FOUND & FIXED - RESTART BACKEND NOW!
+
+**Issue:** OTP service calls were failing (500 errors)  
+**Root Cause:** Function name mismatch in vendorController  
+**Status:** ✅ **FIXED** - But needs server restart
+
+---
+
+## 🎯 WHAT WAS WRONG
+
+The vendorController was calling `otpService.sendOtp()` but the service only exports `generateOtp()`.
+
+This caused a **runtime error → 500 response**.
+
+---
+
+## ✅ WHAT'S NOW FIXED
+
+**File:** `vendorController.js`
+
+**Changes:**
+1. Line 35: `otpService.sendOtp()` → `otpService.generateOtp()`
+2. Line 42: `result.otp` → `otp`
+3. Line 72: `otpResult.success` → `otpResult.valid`
+4. Line 75: `otpResult.message` → `otpResult.reason`
+
+---
+
+## ⚡ RESTART BACKEND NOW
+
+```bash
+# In your backend terminal:
+Ctrl+C
+npm run dev
+```
+
+Wait for:
+```
+🚀 Dechta CLIENT backend running on port 5001
+```
+
+---
+
+## 🧪 THEN TEST
+
+```bash
+curl -X POST http://localhost:5001/api/vendors/auth/send-otp \
+  -H "Content-Type: application/json" \
+  -d '{"phone": "9876543210"}'
+
+# Should now return:
+# { "success": true, "dev_otp": "1234" }
+```
+
+---
+
+## 📱 THEN TEST IN BROWSER
+
+1. Hard refresh: `Ctrl+Shift+R`
+2. Go to vendor login
+3. Enter phone: `9876543210`
+4. Click "Send OTP"
+5. Should work! ✅
+
+---
+
+**DO THIS NOW:** Restart backend server!

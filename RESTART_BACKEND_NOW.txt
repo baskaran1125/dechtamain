@@ -1,0 +1,68 @@
+⚠️ CRITICAL: YOU MUST DO THIS NOW
+
+The code has been fixed. But you need to RESTART the backend server for it to work.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔴 STEP 1: STOP THE BACKEND
+
+In your backend terminal window, press:
+    CTRL + C
+
+Wait for it to stop completely. You should see something like:
+    ^C (or similar termination message)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🟢 STEP 2: START THE BACKEND AGAIN
+
+In the SAME terminal window, paste this command:
+
+cd C:\Users\LOKI\OneDrive\Desktop\D\Dechta\dechta-client\backend && npm run dev
+
+Then press ENTER.
+
+You should see output like this:
+    ✅ PostgreSQL connection verified
+    ✅ Unified schema mode enabled
+    🚀 Dechta CLIENT backend running on port 5001
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔵 STEP 3: REFRESH YOUR BROWSER
+
+In your browser:
+1. Go to http://localhost:5173
+2. Press Ctrl+Shift+R (hard refresh - not just F5!)
+3. Wait for page to reload
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ STEP 4: TEST VENDOR LOGIN
+
+1. Go to vendor login
+2. Enter phone: 9876543210
+3. Click "Send OTP"
+4. It should now work! ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❓ HOW TO VERIFY
+
+Open browser DevTools (F12) and check Network tab:
+- You should see: POST /api/vendors/auth/send-otp
+- Status should be: 200 (success)
+- Response should show: { "success": true, ... }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ IMPORTANT
+
+If you skip restarting, the old backend is still running and it won't
+have the vendor auth endpoints.
+
+YOU MUST RESTART THE BACKEND OR IT WON'T WORK!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Done? Let me know what happens!
