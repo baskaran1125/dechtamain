@@ -46,6 +46,70 @@ const extractVendorPayload = (responseData) => {
   return responseData;
 };
 
+const isKycApprovedFromCache = () => {
+  try {
+    const raw = localStorage.getItem('dechta_kyc_profile');
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    const status = String(parsed?.verificationStatus || '').trim().toLowerCase();
+    return ['approved', 'verified', 'completed'].includes(status);
+  } catch {
+    return false;
+  }
+};
+
+const isVendorApprovedForCatalog = (vendorData) => {
+  const hasVendorPayload = !!(vendorData && typeof vendorData === 'object' && Object.keys(vendorData).length > 0);
+  if (!hasVendorPayload) {
+    // Fail open for unknown client state; backend product APIs still enforce verification.
+    return true;
+  }
+
+  const verification = String(
+    vendorData?.verificationStatus ||
+    vendorData?.verification_status ||
+    vendorData?.userVerificationStatus ||
+    ''
+  ).trim().toLowerCase();
+
+  const statusToken = String(vendorData?.status || vendorData?.user_status || '').trim().toLowerCase();
+
+  const approvedFlag =
+    vendorData?.isApproved === true ||
+    vendorData?.is_approved === true ||
+    String(vendorData?.isApproved || vendorData?.is_approved || '').trim().toLowerCase() === 'true' ||
+    Number(vendorData?.isApproved || vendorData?.is_approved || 0) === 1;
+
+  if (['rejected', 'declined', 'suspended', 'banned'].includes(verification)) return false;
+  if (['rejected', 'suspended', 'banned'].includes(statusToken)) return false;
+  if (['pending', 'pending_verification', 'under_review', 'submitted'].includes(verification)) return false;
+
+  if (['verified', 'approved', 'completed'].includes(verification)) return true;
+  if (approvedFlag) return true;
+  if (['approved', 'verified'].includes(statusToken)) return true;
+  if (isKycApprovedFromCache()) return true;
+
+  // Unknown explicit token should not hard-lock UI; backend remains the source of truth.
+  return true;
+};
+
+const CatalogLockedNotice = ({ onOpenSettings }) => (
+  <div className="p-6">
+    <div className="max-w-2xl mx-auto bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
+      <h3 className="text-xl font-bold text-gray-900 dark:text-white">Catalog Locked</h3>
+      <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+        Submit your vendor details in Settings and wait for admin approval. Catalog access will be enabled after verification.
+      </p>
+      <button
+        onClick={onOpenSettings}
+        className="mt-4 px-4 py-2 rounded-lg bg-[#0ceded] text-black text-sm font-bold hover:opacity-90"
+      >
+        Open Settings
+      </button>
+    </div>
+  </div>
+);
+
 const App = () => {
   const [selectedRole,  setSelectedRole] = useState(null);  // null = show welcome, 'vendor' = vendor app
   const [isAuth,       setIsAuth]       = useState(false);
@@ -132,14 +196,36 @@ const App = () => {
 
   const fetchAll = async () => {
     try {
-      const [vRes, pRes, oRes, sRes, iRes] = await Promise.all([
+      const [vRes, pRes, oRes, sRes, iRes] = await Promise.allSettled([
         getProfile(), getProducts(), getOrders(), getSettlements(), getInvoices(),
       ]);
-      setVendor(extractVendorPayload(vRes?.data));
-      setProducts(pRes.data?.products || pRes.data?.data || []);
-      setOrders(oRes.data?.data || oRes.data?.orders || []);
-      setSettlements(sRes.data?.settlements || sRes.data?.data || []);
-      setInvoices(iRes.data?.invoices || iRes.data?.data || []);
+
+      if (vRes.status === 'fulfilled') {
+        setVendor(extractVendorPayload(vRes.value?.data));
+      }
+
+      if (pRes.status === 'fulfilled') {
+        setProducts(pRes.value.data?.products || pRes.value.data?.data || []);
+      }
+
+      if (oRes.status === 'fulfilled') {
+        setOrders(oRes.value.data?.data || oRes.value.data?.orders || []);
+      }
+
+      if (sRes.status === 'fulfilled') {
+        setSettlements(sRes.value.data?.settlements || sRes.value.data?.data || []);
+      }
+
+      if (iRes.status === 'fulfilled') {
+        setInvoices(iRes.value.data?.invoices || iRes.value.data?.data || []);
+      }
+
+      const failures = [vRes, pRes, oRes, sRes, iRes].filter((r) => r.status === 'rejected');
+      const unauthorized = failures.some((r) => r.reason?.response?.status === 401);
+      if (unauthorized) {
+        localStorage.removeItem('dechta_token');
+        setIsAuth(false);
+      }
     } catch (err) {
       console.error('Fetch error:', err);
       if (err.response?.status === 401) {
@@ -237,6 +323,27 @@ const App = () => {
   };
 
   const lowStockCount = products.filter(p => p.stock < 5).length;
+  const catalogUnlocked = isVendorApprovedForCatalog(vendor);
+
+  const safeSetView = (nextView) => {
+    if ((nextView === 'products' || nextView === 'add-product') && !catalogUnlocked) {
+      notify('Catalog access is locked until admin approval.', 'error');
+      setView('settings');
+      return;
+    }
+    setView(nextView);
+  };
+
+  const navItems = NAV.map((item) => {
+    if (item.id === 'products' && !catalogUnlocked) {
+      return {
+        ...item,
+        disabled: true,
+        disabledReason: 'Waiting for admin approval',
+      };
+    }
+    return item;
+  });
 
   // -- Show Welcome Page (Role Selection) --------------------
   if (!selectedRole) {
@@ -301,9 +408,9 @@ const App = () => {
     return (
       <div className="flex h-screen bg-gray-50 dark:bg-slate-950 overflow-hidden font-sans text-gray-900 dark:text-white">
       <Sidebar
-        view={view} setView={setView}
+        view={view} setView={safeSetView}
         vendor={vendor} onLogout={handleLogout}
-        navItems={NAV}
+        navItems={navItems}
       />
 
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
@@ -316,9 +423,13 @@ const App = () => {
         />
 
         <div className="flex-1 overflow-y-auto no-scrollbar bg-gray-50 dark:bg-slate-950 pb-20 md:pb-0">
-          {view === 'home'        && <Dashboard    products={products} orders={orders} setView={setView} />}
-          {view === 'products'    && <ProductList  products={products} setView={setView} toggleActive={handleToggleActive} onBoost={handleBoost} onEdit={p => { setEditProduct(p); setView('add-product'); }} />}
-          {view === 'add-product' && <ProductForm  onSave={handleSaveProduct} editingProduct={editProduct} onCancel={() => { setEditProduct(null); setView('products'); }} notify={notify} />}
+          {view === 'home'        && <Dashboard    products={products} orders={orders} setView={safeSetView} />}
+          {view === 'products'    && (catalogUnlocked
+            ? <ProductList  products={products} setView={safeSetView} toggleActive={handleToggleActive} onBoost={handleBoost} onEdit={p => { setEditProduct(p); safeSetView('add-product'); }} />
+            : <CatalogLockedNotice onOpenSettings={() => safeSetView('settings')} />)}
+          {view === 'add-product' && (catalogUnlocked
+            ? <ProductForm  onSave={handleSaveProduct} editingProduct={editProduct} onCancel={() => { setEditProduct(null); safeSetView('products'); }} notify={notify} />
+            : <CatalogLockedNotice onOpenSettings={() => safeSetView('settings')} />)}
           {view === 'orders'      && <OrdersPage   orders={orders} onUpdateStatus={handleUpdateStatus} notify={notify} products={products} vendor={vendor} />}
           {view === 'wallet'      && <WalletPage   orders={orders} settlements={settlements} setSettlements={setSettlements} notify={notify} />}
           {view === 'sales'       && <SalesSummary orders={orders} products={products} notify={notify} />}
@@ -326,7 +437,7 @@ const App = () => {
           {view === 'settings'    && <SettingsPage vendor={vendor} updateVendor={handleUpdateVendor} notify={notify} />}
         </div>
 
-        <MobileNav view={view} setView={setView} navItems={NAV} />
+        <MobileNav view={view} setView={safeSetView} navItems={navItems} />
       </main>
 
       {toasts.map(t => (

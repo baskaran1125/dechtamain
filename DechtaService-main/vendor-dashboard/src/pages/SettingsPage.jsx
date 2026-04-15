@@ -72,8 +72,8 @@ const SettingsPage = ({ vendor, updateVendor, notify }) => {
   }, [vendor]);
 
   const status = useMemo(
-    () => normalizeVerificationStatus(kyc?.verificationStatus || vendor?.verificationStatus),
-    [kyc?.verificationStatus, vendor?.verificationStatus]
+    () => normalizeVerificationStatus(vendor?.verificationStatus || vendor?.verification_status || kyc?.verificationStatus),
+    [kyc?.verificationStatus, vendor?.verificationStatus, vendor?.verification_status]
   );
   const disabled = status === STATUS.PENDING_VERIFICATION || status === STATUS.APPROVED;
 

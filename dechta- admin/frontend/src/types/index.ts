@@ -316,6 +316,11 @@ export interface VendorDocs {
     panImageUrl?: string | null;
     registrationCertificateUrl?: string | null;
     passbookCancelledChequeUrl?: string | null;
+    profileDetails?: Record<string, any> | null;
+    companyDetails?: Record<string, any> | null;
+    bankDetails?: Record<string, any> | null;
+    addressDetails?: Record<string, any> | null;
+    rawDocuments?: Record<string, any> | null;
 }
 
 export interface PendingWorker {

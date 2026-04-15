@@ -3,7 +3,6 @@
 
 const { sendOtp, verifyOtp } = require('../services/otpService');
 const db = require('../config/database');
-const { v4: uuidv4 } = require('uuid');
 
 const CASHFREE_API_VERSION = '2023-08-01';
 const WORKER_ORDER_PREFIX = 'WKR_ADD_';
@@ -19,6 +18,180 @@ const WORKER_FAILURE_STATUSES = new Set([
 ]);
 
 let workerPaymentOrdersTableReady = false;
+let workerCoreSchemaReady = false;
+
+async function ensureWorkerCoreSchema() {
+  if (workerCoreSchemaReady) return;
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS worker_notifications (
+      id BIGSERIAL PRIMARY KEY,
+      worker_id BIGINT NOT NULL REFERENCES worker_profiles(id) ON DELETE CASCADE,
+      title VARCHAR(255) NOT NULL,
+      message TEXT NOT NULL,
+      type VARCHAR(50) DEFAULT 'info',
+      status VARCHAR(20) NOT NULL DEFAULT 'unread',
+      metadata JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      read_at TIMESTAMP
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS worker_bank_accounts (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      worker_id BIGINT NOT NULL REFERENCES worker_profiles(id) ON DELETE CASCADE,
+      account_holder_name VARCHAR(120),
+      account_number VARCHAR(40),
+      ifsc_code VARCHAR(20),
+      bank_name VARCHAR(120),
+      upi_id VARCHAR(120),
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      UNIQUE(worker_id)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS worker_jobs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      worker_id BIGINT NOT NULL REFERENCES worker_profiles(id) ON DELETE CASCADE,
+      service_type VARCHAR(120),
+      amount NUMERIC(10,2) DEFAULT 0,
+      payment_method VARCHAR(30),
+      status VARCHAR(30) DEFAULT 'completed',
+      elapsed_seconds INTEGER DEFAULT 0,
+      customer_name VARCHAR(120),
+      customer_phone VARCHAR(20),
+      address TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      started_at TIMESTAMP,
+      completed_at TIMESTAMP
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS worker_job_chats (
+      id BIGSERIAL PRIMARY KEY,
+      job_id UUID NOT NULL REFERENCES worker_jobs(id) ON DELETE CASCADE,
+      worker_id BIGINT NOT NULL REFERENCES worker_profiles(id) ON DELETE CASCADE,
+      sender_type VARCHAR(30) NOT NULL DEFAULT 'worker',
+      message TEXT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS worker_location_logs (
+      id BIGSERIAL PRIMARY KEY,
+      worker_id BIGINT NOT NULL REFERENCES worker_profiles(id) ON DELETE CASCADE,
+      job_id UUID REFERENCES worker_jobs(id) ON DELETE SET NULL,
+      latitude NUMERIC(10,8),
+      longitude NUMERIC(11,8),
+      accuracy NUMERIC(10,2),
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS worker_support_tickets (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      worker_id BIGINT NOT NULL REFERENCES worker_profiles(id) ON DELETE CASCADE,
+      subject VARCHAR(255) NOT NULL,
+      message TEXT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'open',
+      priority VARCHAR(20) NOT NULL DEFAULT 'normal',
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS worker_support_messages (
+      id BIGSERIAL PRIMARY KEY,
+      ticket_id UUID NOT NULL REFERENCES worker_support_tickets(id) ON DELETE CASCADE,
+      sender_type VARCHAR(30) NOT NULL DEFAULT 'worker',
+      message TEXT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS worker_withdrawals (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      worker_id BIGINT NOT NULL REFERENCES worker_profiles(id) ON DELETE CASCADE,
+      amount NUMERIC(10,2) NOT NULL,
+      method VARCHAR(20) DEFAULT 'bank',
+      upi_id VARCHAR(120),
+      account_number VARCHAR(40),
+      ifsc_code VARCHAR(20),
+      status VARCHAR(20) NOT NULL DEFAULT 'pending',
+      remarks TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      processed_at TIMESTAMP
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS worker_transactions (
+      id BIGSERIAL PRIMARY KEY,
+      worker_id BIGINT NOT NULL REFERENCES worker_profiles(id) ON DELETE CASCADE,
+      amount NUMERIC(10,2) NOT NULL,
+      description TEXT,
+      transaction_type VARCHAR(30) NOT NULL,
+      related_ref VARCHAR(120),
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS current_latitude NUMERIC(10,8)
+  `);
+  await db.query(`
+    ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS current_longitude NUMERIC(11,8)
+  `);
+  await db.query(`
+    ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS last_location_at TIMESTAMP
+  `);
+  await db.query(`
+    ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS is_online BOOLEAN DEFAULT false
+  `);
+  await db.query(`
+    ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP
+  `);
+  await db.query(`
+    ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS phone VARCHAR(20)
+  `);
+  await db.query(`
+    ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS skill_category VARCHAR(100)
+  `);
+  await db.query(`
+    ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT false
+  `);
+  await db.query(`
+    ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS is_profile_complete BOOLEAN DEFAULT false
+  `);
+  await db.query(`
+    ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0
+  `);
+
+  await db.query(`
+    UPDATE worker_profiles wp
+    SET phone = u.phone_number
+    FROM users u
+    WHERE wp.user_id = u.id
+      AND (wp.phone IS NULL OR wp.phone = '')
+  `).catch(() => {});
+
+  await db.query('CREATE INDEX IF NOT EXISTS idx_worker_notifications_worker ON worker_notifications(worker_id, created_at DESC)');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_worker_jobs_worker ON worker_jobs(worker_id, created_at DESC)');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_worker_transactions_worker ON worker_transactions(worker_id, created_at DESC)');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_worker_withdrawals_worker ON worker_withdrawals(worker_id, created_at DESC)');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_worker_locations_worker ON worker_location_logs(worker_id, created_at DESC)');
+
+  workerCoreSchemaReady = true;
+}
 
 function getApiBaseUrl(request) {
   const fromEnv = String(process.env.PUBLIC_API_URL || '').trim();
@@ -91,7 +264,7 @@ async function ensureWorkerPaymentOrdersTable() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS worker_payment_orders (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      worker_id UUID NOT NULL REFERENCES worker_profiles(id) ON DELETE CASCADE,
+      worker_id BIGINT NOT NULL REFERENCES worker_profiles(id) ON DELETE CASCADE,
       cashfree_order_id VARCHAR(120) NOT NULL UNIQUE,
       amount NUMERIC(10,2) NOT NULL,
       status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
@@ -268,14 +441,40 @@ async function workerVerifyOtp(request, reply) {
       return reply.code(400).send({ success: false, message: otpResult.message });
     }
 
-    // Look up worker profile by mobile
+    // Ensure user row exists for worker
+    let user = null;
+    const userLookup = await db.query(
+      `SELECT *
+       FROM users
+       WHERE phone_number = $1 AND user_type = 'worker'
+       LIMIT 1`,
+      [mobile]
+    ).catch(() => ({ rows: [] }));
+
+    user = userLookup.rows[0] || null;
+    if (!user) {
+      const userInsert = await db.query(
+        `INSERT INTO users
+          (phone_number, user_type, status, is_approved, is_verified, profile_complete, verification_status, created_at, updated_at)
+         VALUES ($1, 'worker', 'active', false, true, false, 'pending', NOW(), NOW())
+         RETURNING *`,
+        [mobile]
+      );
+      user = userInsert.rows[0];
+    }
+
+    // Look up worker profile by user_id/phone
     let worker = null;
     let isNewWorker = false;
 
     try {
       const res = await db.query(
-        'SELECT * FROM worker_profiles WHERE phone = $1 LIMIT 1',
-        [mobile]
+        `SELECT *
+         FROM worker_profiles
+         WHERE user_id = $1 OR phone = $2
+         ORDER BY id ASC
+         LIMIT 1`,
+        [user.id, mobile]
       );
       worker = res.rows[0] || null;
     } catch (dbErr) {
@@ -284,51 +483,15 @@ async function workerVerifyOtp(request, reply) {
     }
 
     if (!worker) {
-      // New worker — create in auth_users table first, then profile
+      // New worker — create profile row directly (id is BIGSERIAL in existing schema)
       isNewWorker = true;
       try {
-        // Step 1: Get or create entry in worker_auth_users
-        let authUser = null;
-        let workerId = null;
-
-        // Try to find existing auth user
-        const existingAuth = await db.query(
-          'SELECT id FROM worker_auth_users WHERE phone = $1 LIMIT 1',
-          [mobile]
-        ).catch(() => null);
-
-        if (existingAuth?.rows?.[0]) {
-          workerId = existingAuth.rows[0].id;
-        } else {
-          // Create new auth user
-          workerId = uuidv4();
-          try {
-            await db.query(
-              `INSERT INTO worker_auth_users (id, phone, created_at)
-               VALUES ($1, $2, NOW())`,
-              [workerId, mobile]
-            );
-          } catch (authErr) {
-            // If it fails due to unique constraint, fetch the existing ID
-            const fetchExisting = await db.query(
-              'SELECT id FROM worker_auth_users WHERE phone = $1 LIMIT 1',
-              [mobile]
-            );
-            if (fetchExisting.rows[0]) {
-              workerId = fetchExisting.rows[0].id;
-            } else {
-              throw authErr;
-            }
-          }
-        }
-
-        // Step 2: Create profile in worker_profiles with FK reference
         const ins = await db.query(
           `INSERT INTO worker_profiles
-             (id, phone, full_name, is_approved, is_profile_complete, created_at)
-           VALUES ($1, $2, '', false, false, NOW())
+             (user_id, phone, full_name, is_approved, is_profile_complete, wallet_balance, total_jobs, role, created_at, updated_at)
+           VALUES ($1, $2, '', false, false, 0, 0, 'worker', NOW(), NOW())
            RETURNING *`,
-          [workerId, mobile]
+          [user.id, mobile]
         );
         worker = ins.rows[0];
       } catch (insertErr) {
@@ -338,6 +501,17 @@ async function workerVerifyOtp(request, reply) {
           message: 'Failed to create worker profile: ' + insertErr.message,
         });
       }
+    } else if (worker.user_id !== user.id || worker.phone !== mobile) {
+      const updated = await db.query(
+        `UPDATE worker_profiles
+         SET user_id = $1,
+             phone = $2,
+             updated_at = NOW()
+         WHERE id = $3
+         RETURNING *`,
+        [user.id, mobile, worker.id]
+      );
+      worker = updated.rows[0] || worker;
     }
 
     const token = await reply.jwtSign(
@@ -391,7 +565,8 @@ async function workerRegister(request, reply) {
       `UPDATE worker_profiles
        SET full_name = $1, skill_category = $2,
            state = $3, city = $4, area = $5, address = $6,
-           is_profile_complete = true
+         is_profile_complete = true,
+         updated_at = NOW()
        WHERE phone = $7
        RETURNING *`,
       [name, skillCategory, state, city, area, address, mobile]
@@ -423,6 +598,7 @@ async function workerRegister(request, reply) {
 // ──────────────────────────────────────────────────────────────
 async function getWorkerProfile(request, reply) {
   try {
+    await ensureWorkerCoreSchema();
     const result = await db.query(
       'SELECT * FROM worker_profiles WHERE id = $1 LIMIT 1',
       [request.worker.id]
@@ -440,6 +616,7 @@ async function getWorkerProfile(request, reply) {
 // ──────────────────────────────────────────────────────────────
 async function getProfile(request, reply) {
   try {
+    await ensureWorkerCoreSchema();
     const result = await db.query(
       'SELECT * FROM worker_profiles WHERE id = $1 LIMIT 1',
       [request.worker.id]
@@ -509,19 +686,70 @@ async function submitDocuments(request, reply) {
 // NOTIFICATIONS
 // ──────────────────────────────────────────────────────────────
 async function getNotifications(request, reply) {
-  return reply.send({ success: true, data: [] });
+  try {
+    await ensureWorkerCoreSchema();
+    const result = await db.query(
+      `SELECT id, title, message, type, status, metadata, created_at, read_at
+       FROM worker_notifications
+       WHERE worker_id = $1
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [request.worker.id]
+    );
+    return reply.send({ success: true, data: result.rows });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to fetch notifications' });
+  }
 }
 
 async function getUnreadCount(request, reply) {
-  return reply.send({ success: true, count: 0 });
+  try {
+    await ensureWorkerCoreSchema();
+    const result = await db.query(
+      `SELECT COUNT(*)::int AS count
+       FROM worker_notifications
+       WHERE worker_id = $1 AND status = 'unread'`,
+      [request.worker.id]
+    );
+    return reply.send({ success: true, count: result.rows[0]?.count || 0 });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to fetch unread count' });
+  }
 }
 
 async function markNotificationRead(request, reply) {
-  return reply.send({ success: true });
+  try {
+    await ensureWorkerCoreSchema();
+    const { id } = request.params;
+    await db.query(
+      `UPDATE worker_notifications
+       SET status = 'read', read_at = NOW()
+       WHERE id = $1 AND worker_id = $2`,
+      [id, request.worker.id]
+    );
+    return reply.send({ success: true });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to mark notification as read' });
+  }
 }
 
 async function markAllNotificationsRead(request, reply) {
-  return reply.send({ success: true });
+  try {
+    await ensureWorkerCoreSchema();
+    await db.query(
+      `UPDATE worker_notifications
+       SET status = 'read', read_at = NOW()
+       WHERE worker_id = $1 AND status = 'unread'`,
+      [request.worker.id]
+    );
+    return reply.send({ success: true });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to mark all notifications as read' });
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -565,11 +793,70 @@ async function getJobRateSettings(request, reply) {
 // BANK DETAILS
 // ──────────────────────────────────────────────────────────────
 async function getBankDetails(request, reply) {
-  return reply.send({ success: true, data: null });
+  try {
+    await ensureWorkerCoreSchema();
+    const result = await db.query(
+      `SELECT account_holder_name, account_number, ifsc_code, bank_name, upi_id, updated_at
+       FROM worker_bank_accounts
+       WHERE worker_id = $1
+       LIMIT 1`,
+      [request.worker.id]
+    );
+    return reply.send({ success: true, data: result.rows[0] || null });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to fetch bank details' });
+  }
 }
 
 async function submitBankDetails(request, reply) {
-  return reply.send({ success: true, message: 'Bank details saved' });
+  try {
+    await ensureWorkerCoreSchema();
+    const b = request.body || {};
+    await db.query(
+      `INSERT INTO worker_bank_accounts
+        (worker_id, account_holder_name, account_number, ifsc_code, bank_name, upi_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       ON CONFLICT (worker_id)
+       DO UPDATE SET
+         account_holder_name = EXCLUDED.account_holder_name,
+         account_number = EXCLUDED.account_number,
+         ifsc_code = EXCLUDED.ifsc_code,
+         bank_name = EXCLUDED.bank_name,
+         upi_id = EXCLUDED.upi_id,
+         updated_at = NOW()`,
+      [
+        request.worker.id,
+        b.accountHolderName || b.account_holder_name || null,
+        b.accountNumber || b.account_number || null,
+        b.ifscCode || b.ifsc_code || null,
+        b.bankName || b.bank_name || null,
+        b.upiId || b.upi_id || null,
+      ]
+    );
+    return reply.send({ success: true, message: 'Bank details saved' });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to save bank details' });
+  }
+}
+
+async function getJobs(request, reply) {
+  try {
+    await ensureWorkerCoreSchema();
+    const result = await db.query(
+      `SELECT *
+       FROM worker_jobs
+       WHERE worker_id = $1
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [request.worker.id]
+    );
+    return reply.send({ success: true, data: result.rows });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to fetch jobs' });
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -581,6 +868,7 @@ async function recordJob(request, reply) {
 
   // db is required at the top of this file
   try {
+    await ensureWorkerCoreSchema();
     const client = await db.beginTransaction();
     const res = await client.query('SELECT wallet_balance FROM worker_profiles WHERE id = $1 FOR UPDATE', [workerId]);
     const worker = res.rows[0];
@@ -596,6 +884,13 @@ async function recordJob(request, reply) {
     await client.query(
       'UPDATE worker_profiles SET wallet_balance = $1, total_jobs = COALESCE(total_jobs, 0) + 1 WHERE id = $2',
       [newBalance, workerId]
+    );
+
+    await client.query(
+      `INSERT INTO worker_jobs
+        (worker_id, service_type, amount, payment_method, status, elapsed_seconds, created_at, updated_at, completed_at)
+       VALUES ($1, $2, $3, $4, 'completed', $5, NOW(), NOW(), NOW())`,
+      [workerId, serviceType || 'General', newAmount, paymentMethod || 'cash', Number(elapsedSeconds) || 0]
     );
 
     // Save transaction
@@ -620,7 +915,21 @@ async function recordJob(request, reply) {
 // TRANSACTIONS
 // ──────────────────────────────────────────────────────────────
 async function getTransactions(request, reply) {
-  return reply.send({ success: true, data: [] });
+  try {
+    await ensureWorkerCoreSchema();
+    const result = await db.query(
+      `SELECT id, amount, description, transaction_type, related_ref, created_at
+       FROM worker_transactions
+       WHERE worker_id = $1
+       ORDER BY created_at DESC
+       LIMIT 200`,
+      [request.worker.id]
+    );
+    return reply.send({ success: true, data: result.rows });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to fetch transactions' });
+  }
 }
 
 async function recordTransaction(request, reply) {
@@ -631,45 +940,240 @@ async function recordTransaction(request, reply) {
 // SUPPORT TICKETS
 // ──────────────────────────────────────────────────────────────
 async function createTicket(request, reply) {
-  return reply.send({ success: true, message: 'Ticket created', data: { id: 0 } });
+  try {
+    await ensureWorkerCoreSchema();
+    const { subject, message, priority } = request.body || {};
+    if (!subject || !message) {
+      return reply.code(400).send({ success: false, message: 'Subject and message are required' });
+    }
+
+    const created = await db.query(
+      `INSERT INTO worker_support_tickets
+        (worker_id, subject, message, status, priority, created_at, updated_at)
+       VALUES ($1, $2, $3, 'open', COALESCE($4, 'normal'), NOW(), NOW())
+       RETURNING *`,
+      [request.worker.id, subject, message, priority || 'normal']
+    );
+
+    await db.query(
+      `INSERT INTO worker_support_messages (ticket_id, sender_type, message, created_at)
+       VALUES ($1, 'worker', $2, NOW())`,
+      [created.rows[0].id, message]
+    );
+
+    return reply.send({ success: true, message: 'Ticket created', data: created.rows[0] });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to create support ticket' });
+  }
 }
 
 async function getTickets(request, reply) {
-  return reply.send({ success: true, data: [] });
+  try {
+    await ensureWorkerCoreSchema();
+    const result = await db.query(
+      `SELECT *
+       FROM worker_support_tickets
+       WHERE worker_id = $1
+       ORDER BY updated_at DESC
+       LIMIT 100`,
+      [request.worker.id]
+    );
+    return reply.send({ success: true, data: result.rows });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to fetch support tickets' });
+  }
 }
 
 async function getTicketMessages(request, reply) {
-  return reply.send({ success: true, data: [] });
+  try {
+    await ensureWorkerCoreSchema();
+    const { ticketId } = request.params;
+    const ticket = await db.query(
+      'SELECT id FROM worker_support_tickets WHERE id = $1 AND worker_id = $2 LIMIT 1',
+      [ticketId, request.worker.id]
+    );
+    if (!ticket.rows[0]) {
+      return reply.code(404).send({ success: false, message: 'Support ticket not found' });
+    }
+
+    const result = await db.query(
+      `SELECT id, sender_type, message, created_at
+       FROM worker_support_messages
+       WHERE ticket_id = $1
+       ORDER BY created_at ASC`,
+      [ticketId]
+    );
+    return reply.send({ success: true, data: result.rows });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to fetch ticket messages' });
+  }
 }
 
 async function sendTicketMessage(request, reply) {
-  return reply.send({ success: true, message: 'Message sent' });
+  try {
+    await ensureWorkerCoreSchema();
+    const { ticketId } = request.params;
+    const message = String(request.body?.message || '').trim();
+    if (!message) {
+      return reply.code(400).send({ success: false, message: 'Message is required' });
+    }
+
+    const ticket = await db.query(
+      'SELECT id FROM worker_support_tickets WHERE id = $1 AND worker_id = $2 LIMIT 1',
+      [ticketId, request.worker.id]
+    );
+    if (!ticket.rows[0]) {
+      return reply.code(404).send({ success: false, message: 'Support ticket not found' });
+    }
+
+    await db.query(
+      `INSERT INTO worker_support_messages (ticket_id, sender_type, message, created_at)
+       VALUES ($1, 'worker', $2, NOW())`,
+      [ticketId, message]
+    );
+    await db.query('UPDATE worker_support_tickets SET updated_at = NOW() WHERE id = $1', [ticketId]);
+
+    return reply.send({ success: true, message: 'Message sent' });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to send message' });
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
 // JOB CHAT
 // ──────────────────────────────────────────────────────────────
 async function getJobChat(request, reply) {
-  return reply.send({ success: true, data: [] });
+  try {
+    await ensureWorkerCoreSchema();
+    const { jobId } = request.params;
+    const job = await db.query(
+      'SELECT id FROM worker_jobs WHERE id = $1 AND worker_id = $2 LIMIT 1',
+      [jobId, request.worker.id]
+    );
+    if (!job.rows[0]) return reply.code(404).send({ success: false, message: 'Job not found' });
+
+    const result = await db.query(
+      `SELECT id, sender_type, message, created_at
+       FROM worker_job_chats
+       WHERE job_id = $1
+       ORDER BY created_at ASC`,
+      [jobId]
+    );
+    return reply.send({ success: true, data: result.rows });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to fetch job chat' });
+  }
 }
 
 async function sendJobChat(request, reply) {
-  return reply.send({ success: true, message: 'Chat message sent' });
+  try {
+    await ensureWorkerCoreSchema();
+    const { jobId } = request.params;
+    const message = String(request.body?.message || '').trim();
+    if (!message) return reply.code(400).send({ success: false, message: 'Message is required' });
+
+    const job = await db.query(
+      'SELECT id FROM worker_jobs WHERE id = $1 AND worker_id = $2 LIMIT 1',
+      [jobId, request.worker.id]
+    );
+    if (!job.rows[0]) return reply.code(404).send({ success: false, message: 'Job not found' });
+
+    const inserted = await db.query(
+      `INSERT INTO worker_job_chats (job_id, worker_id, sender_type, message, created_at)
+       VALUES ($1, $2, 'worker', $3, NOW())
+       RETURNING id, sender_type, message, created_at`,
+      [jobId, request.worker.id, message]
+    );
+    return reply.send({ success: true, message: 'Chat message sent', data: inserted.rows[0] });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to send job chat message' });
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
 // GPS / LOCATION
 // ──────────────────────────────────────────────────────────────
 async function updateLocation(request, reply) {
-  return reply.send({ success: true });
+  try {
+    await ensureWorkerCoreSchema();
+    const latitude = Number(request.body?.latitude);
+    const longitude = Number(request.body?.longitude);
+    const accuracy = Number(request.body?.accuracy || 0);
+    const jobId = request.body?.jobId || null;
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return reply.code(400).send({ success: false, message: 'Valid latitude and longitude are required' });
+    }
+
+    await db.query(
+      `UPDATE worker_profiles
+       SET current_latitude = $1,
+           current_longitude = $2,
+           last_location_at = NOW(),
+           last_seen_at = NOW()
+       WHERE id = $3`,
+      [latitude, longitude, request.worker.id]
+    );
+
+    await db.query(
+      `INSERT INTO worker_location_logs (worker_id, job_id, latitude, longitude, accuracy, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [request.worker.id, jobId, latitude, longitude, Number.isFinite(accuracy) ? accuracy : null]
+    );
+
+    return reply.send({ success: true });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to update location' });
+  }
 }
 
 async function getLocation(request, reply) {
-  return reply.send({ success: true, data: null });
+  try {
+    await ensureWorkerCoreSchema();
+    const result = await db.query(
+      `SELECT current_latitude, current_longitude, last_location_at
+       FROM worker_profiles
+       WHERE id = $1
+       LIMIT 1`,
+      [request.worker.id]
+    );
+    const row = result.rows[0] || null;
+    return reply.send({ success: true, data: row });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to fetch location' });
+  }
 }
 
 async function getJobLocationHistory(request, reply) {
-  return reply.send({ success: true, data: [] });
+  try {
+    await ensureWorkerCoreSchema();
+    const { jobId } = request.params;
+    const job = await db.query(
+      'SELECT id FROM worker_jobs WHERE id = $1 AND worker_id = $2 LIMIT 1',
+      [jobId, request.worker.id]
+    );
+    if (!job.rows[0]) return reply.code(404).send({ success: false, message: 'Job not found' });
+
+    const result = await db.query(
+      `SELECT latitude, longitude, accuracy, created_at
+       FROM worker_location_logs
+       WHERE worker_id = $1 AND job_id = $2
+       ORDER BY created_at ASC`,
+      [request.worker.id, jobId]
+    );
+    return reply.send({ success: true, data: result.rows });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to fetch job location history' });
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -683,18 +1187,105 @@ async function uploadFile(request, reply) {
 // WITHDRAWALS
 // ──────────────────────────────────────────────────────────────
 async function createWithdrawal(request, reply) {
-  return reply.send({ success: true, message: 'Withdrawal request submitted' });
+  try {
+    await ensureWorkerCoreSchema();
+    const amount = Number(request.body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return reply.code(400).send({ success: false, message: 'Valid amount is required' });
+    }
+
+    const method = String(request.body?.method || 'bank').toLowerCase();
+    const upiId = request.body?.upiId || null;
+    const accountNumber = request.body?.accountNumber || null;
+    const ifscCode = request.body?.ifscCode || null;
+
+    const client = await db.beginTransaction();
+    const walletRes = await client.query(
+      'SELECT wallet_balance FROM worker_profiles WHERE id = $1 FOR UPDATE',
+      [request.worker.id]
+    );
+    const profile = walletRes.rows[0];
+    if (!profile) {
+      await client.query('ROLLBACK');
+      client.release();
+      return reply.code(404).send({ success: false, message: 'Worker not found' });
+    }
+
+    const currentBalance = Number(profile.wallet_balance || 0);
+    if (currentBalance < amount) {
+      await client.query('ROLLBACK');
+      client.release();
+      return reply.code(400).send({ success: false, message: 'Insufficient wallet balance' });
+    }
+
+    await client.query(
+      `UPDATE worker_profiles
+       SET wallet_balance = wallet_balance - $1
+       WHERE id = $2`,
+      [amount, request.worker.id]
+    );
+
+    const inserted = await client.query(
+      `INSERT INTO worker_withdrawals
+        (worker_id, amount, method, upi_id, account_number, ifsc_code, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW())
+       RETURNING *`,
+      [request.worker.id, amount, method, upiId, accountNumber, ifscCode]
+    );
+
+    await client.query(
+      `INSERT INTO worker_transactions (worker_id, amount, description, transaction_type, related_ref, created_at)
+       VALUES ($1, $2, $3, 'debit', $4, NOW())`,
+      [request.worker.id, amount, 'Withdrawal request', inserted.rows[0].id]
+    );
+
+    await client.query('COMMIT');
+    client.release();
+
+    return reply.send({ success: true, message: 'Withdrawal request submitted', data: inserted.rows[0] });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to create withdrawal request' });
+  }
 }
 
 async function getWithdrawals(request, reply) {
-  return reply.send({ success: true, data: [] });
+  try {
+    await ensureWorkerCoreSchema();
+    const result = await db.query(
+      `SELECT *
+       FROM worker_withdrawals
+       WHERE worker_id = $1
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [request.worker.id]
+    );
+    return reply.send({ success: true, data: result.rows });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to fetch withdrawals' });
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
 // ONLINE STATUS
 // ──────────────────────────────────────────────────────────────
 async function toggleStatus(request, reply) {
-  return reply.send({ success: true });
+  try {
+    await ensureWorkerCoreSchema();
+    const isOnline = !!request.body?.isOnline;
+    await db.query(
+      `UPDATE worker_profiles
+       SET is_online = $1,
+           last_seen_at = NOW()
+       WHERE id = $2`,
+      [isOnline, request.worker.id]
+    );
+    return reply.send({ success: true, isOnline });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to update online status' });
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -896,7 +1487,22 @@ async function verifyWorkerWalletPayment(request, reply) {
 }
 
 async function updateWalletBalance(request, reply) {
-  return reply.send({ success: true });
+  try {
+    await ensureWorkerCoreSchema();
+    const balance = Number(request.body?.balance);
+    if (!Number.isFinite(balance) || balance < 0) {
+      return reply.code(400).send({ success: false, message: 'Valid balance is required' });
+    }
+
+    await db.query(
+      'UPDATE worker_profiles SET wallet_balance = $1, last_seen_at = NOW() WHERE id = $2',
+      [balance, request.worker.id]
+    );
+    return reply.send({ success: true, balance });
+  } catch (err) {
+    request.log.error(err);
+    return reply.code(500).send({ success: false, message: 'Failed to update wallet balance' });
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -978,6 +1584,7 @@ module.exports = {
   getJobRateSettings,
   getBankDetails,
   submitBankDetails,
+  getJobs,
   recordJob,
   getTransactions,
   recordTransaction,
@@ -1005,5 +1612,6 @@ module.exports = {
   getHelpArticles,
   getHelpArticleBySlug,
   workerLogout,
+  ensureWorkerCoreSchema,
 };
 

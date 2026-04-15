@@ -4,6 +4,7 @@
 const { sendOtp, verifyOtp } = require('../services/otpService');
 const db = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
+const { broadcastNewOrderToOnlineDrivers } = require('../services/socketService');
 
 let vendorSchemaReadyPromise = null;
 const tableColumnsCache = new Map();
@@ -815,28 +816,46 @@ async function updateVendorProfile(request, reply) {
       }
     }
 
-    if (bankDetails && (await tableExists('app_settings'))) {
-      const bankSnapshot = {
+    if ((profileDetails || companyDetails || bankDetails) && (await tableExists('app_settings'))) {
+      const profileSnapshot = profileDetails || null;
+      const companySnapshot = companyDetails || null;
+      const addressSnapshot = {
+        address: resolvedAddress || null,
+        locationLabel: resolvedLocationLabel || null,
+        latitude: resolvedLatitude,
+        longitude: resolvedLongitude,
+      };
+      const bankSnapshot = bankDetails ? {
         accountNo:  bankDetails.accountNo || bankDetails.accountNumber || null,
         ifsc:       bankDetails.ifsc || null,
         bankName:   bankDetails.bankName || null,
         bankBranch: bankDetails.bankBranch || null,
-      };
-      const bankString = JSON.stringify(bankSnapshot);
+      } : null;
 
-      await db.query(
-        `INSERT INTO app_settings (key, value, value_type, description)
-         VALUES ($1, $2, 'string', 'Vendor bank details snapshot')
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-        [`vendor_bank_${request.vendor.id}`, bankString]
-      ).catch(async () => {
+      const snapshotEntries = [
+        { key: `vendor_profile_${request.vendor.id}`, description: 'Vendor profile details snapshot', value: profileSnapshot },
+        { key: `vendor_company_${request.vendor.id}`, description: 'Vendor company details snapshot', value: companySnapshot },
+        { key: `vendor_address_${request.vendor.id}`, description: 'Vendor address details snapshot', value: addressSnapshot },
+        { key: `vendor_bank_${request.vendor.id}`, description: 'Vendor bank details snapshot', value: bankSnapshot },
+        { key: `vendor_documents_${request.vendor.id}`, description: 'Vendor document upload snapshot', value: documents || null },
+      ].filter((entry) => entry.value);
+
+      for (const entry of snapshotEntries) {
+        const valueString = JSON.stringify(entry.value);
         await db.query(
-          `INSERT INTO app_settings (key, value, updated_at)
-           VALUES ($1, $2, NOW())
+          `INSERT INTO app_settings (key, value, value_type, description)
+           VALUES ($1, $2, 'string', $3)
            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-          [`vendor_bank_${request.vendor.id}`, bankString]
-        ).catch(() => {});
-      });
+          [entry.key, valueString, entry.description]
+        ).catch(async () => {
+          await db.query(
+            `INSERT INTO app_settings (key, value, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+            [entry.key, valueString]
+          ).catch(() => {});
+        });
+      }
     }
 
     if (documents && linkedUserId) {
@@ -1054,14 +1073,14 @@ async function updateVendorOrderStatus(request, reply) {
 
   const statusKey = String(status).trim().toLowerCase();
   const resolvedStatus = mapVendorStatusInput(status);
+  const isVendorAcceptAction = ['accept', 'accepted'].includes(statusKey);
 
   try {
-    // Vendor "accept" is controlled by v_status so client-facing status can remain pending until driver progresses.
-    const isVendorAcceptAction = ['accept', 'accepted'].includes(statusKey);
+    // Vendor accept is controlled by v_status so client-facing status can remain pending until driver progresses.
     const rawUpdates = {
       updated_at: new Date().toISOString(),
       status: isVendorAcceptAction ? undefined : resolvedStatus,
-      v_status: isVendorAcceptAction ? 'accept' : undefined,
+      v_status: isVendorAcceptAction ? 'accepted' : undefined,
     };
 
     const filteredUpdates = await filterDataForTable('orders', rawUpdates);
@@ -1072,6 +1091,13 @@ async function updateVendorOrderStatus(request, reply) {
     }
 
     const updatedOrder = result[0];
+
+    if (isVendorAcceptAction && ['accepted', 'accept'].includes(String(updatedOrder?.v_status || '').toLowerCase())) {
+      await broadcastNewOrderToOnlineDrivers(updatedOrder, db).catch((err) => {
+        request.log.warn({ err, orderId: updatedOrder.id }, 'Driver broadcast failed after vendor accept');
+      });
+    }
+
     return reply.send({
       success: true,
       data: {

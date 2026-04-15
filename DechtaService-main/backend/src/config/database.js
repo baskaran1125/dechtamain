@@ -35,6 +35,11 @@ const ALLOWED_TABLES = new Set([
   'vendors','vendor_profiles','vendor_products','vendor_invoices','vendor_wallets',
   'vendor_payment_orders','vendor_withdrawals','vendor_settlements',
   'vendor_support_tickets','vendor_queries',
+  // Worker tables
+  'worker_profiles','worker_auth_users','worker_notifications','worker_bank_accounts',
+  'worker_jobs','worker_job_chats','worker_location_logs','worker_support_tickets',
+  'worker_support_messages','worker_withdrawals','worker_payment_orders',
+  'worker_transactions',
 ]);
 
 const ALLOWED_ORDER_BY = new Set([

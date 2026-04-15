@@ -1,6 +1,10 @@
 // src/routes/vendors.js
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+
 const {
   ensureVendorCompatibilitySchema,
   vendorSendOtp, vendorVerifyOtp, vendorRegister,
@@ -43,6 +47,10 @@ async function authenticateVendor(request, reply) {
 
 async function vendorRoutes(fastify, options) {
   await ensureVendorCompatibilitySchema();
+
+  const vendorUploadDir = path.join(process.cwd(), 'uploads', 'vendor-documents');
+  fs.mkdirSync(vendorUploadDir, { recursive: true });
+  const upload = multer({ dest: vendorUploadDir });
 
   // ── Public auth routes (no auth required) ─────────────────
   fastify.post('/auth/send-otp', {
@@ -132,6 +140,28 @@ async function vendorRoutes(fastify, options) {
     // Queries / Support
     protectedFastify.post('/query', { handler: submitVendorQuery });
     protectedFastify.get('/query',  { handler: getVendorQueries });
+
+    protectedFastify.post('/upload-document', { preHandler: upload.single('file') }, async (request, reply) => {
+      try {
+        if (!request.file) {
+          return reply.code(400).send({ success: false, message: 'No file provided' });
+        }
+
+        const host = request.headers.host;
+        const fallbackBase = `${request.protocol}://${host}`;
+        const baseUrl = (process.env.PUBLIC_API_URL || fallbackBase).replace(/\/$/, '');
+        const relativePath = `/uploads/vendor-documents/${request.file.filename}`;
+
+        return reply.send({
+          success: true,
+          url: `${baseUrl}${relativePath}`,
+          path: relativePath,
+        });
+      } catch (err) {
+        request.log.error(err);
+        return reply.code(500).send({ success: false, message: 'Upload failed' });
+      }
+    });
 
     // ── Wallet Routes ────────────────────────────────────────
     protectedFastify.post('/wallet/create-cashfree-session', { handler: createCashfreeSession });

@@ -30,6 +30,7 @@ async function authenticateWorker(request, reply) {
 }
 
 async function workerRoutes(fastify, options) {
+  await wc.ensureWorkerCoreSchema();
 
   // ── Public auth routes (no auth required) ─────────────────
   fastify.post('/auth/send-otp', { handler: wc.workerSendOtp });
@@ -71,6 +72,7 @@ async function workerRoutes(fastify, options) {
     f.post('/bank-details', { handler: wc.submitBankDetails });
 
     // Jobs
+    f.get('/jobs', { handler: wc.getJobs });
     f.post('/jobs', { handler: wc.recordJob });
     f.get('/jobs/:jobId/chat', { handler: wc.getJobChat });
     f.post('/jobs/:jobId/chat', { handler: wc.sendJobChat });

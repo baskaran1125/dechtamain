@@ -679,7 +679,10 @@ export default function OrdersScreen() {
             </View>
           ) : activeAvailableOrders.length > 0 ? (
             <>
-              <Text style={styles.sectionHeader}><View style={styles.dotPulse}/> NEW REQUESTS</Text>
+              <View style={styles.sectionHeaderRow}>
+                <View style={styles.dotPulse} />
+                <Text style={styles.sectionHeader}>NEW REQUESTS</Text>
+              </View>
               {activeAvailableOrders.map(order => (
                 <View key={order.id} style={styles.orderCard}>
                   <View style={styles.rowBetween}>
@@ -1091,7 +1094,8 @@ const styles = StyleSheet.create({
   tabBtnActive:{backgroundColor:'#FFF',shadowColor:'#000',shadowOpacity:0.1,shadowRadius:2,elevation:2},
   tabText:{fontSize:14,fontWeight:'bold',color:'#64748B'},
   tabTextActive:{color:'#0284C7'},
-  sectionHeader:{fontSize:12,fontWeight:'900',color:'#94A3B8',letterSpacing:1,marginBottom:12,flexDirection:'row',alignItems:'center'},
+  sectionHeaderRow:{flexDirection:'row',alignItems:'center',marginBottom:12},
+  sectionHeader:{fontSize:12,fontWeight:'900',color:'#94A3B8',letterSpacing:1},
   dotPulse:{width:8,height:8,borderRadius:4,backgroundColor:'#0284C7',marginRight:8},
   orderCard:{backgroundColor:'#FFF',borderRadius:24,padding:20,borderWidth:1,borderColor:'#F1F5F9',shadowColor:'#000',shadowOffset:{width:0,height:2},shadowOpacity:0.05,shadowRadius:4,elevation:2,marginBottom:16},
   vehicleBadge:{backgroundColor:'#EFF6FF',alignSelf:'flex-start',paddingHorizontal:8,paddingVertical:4,borderRadius:6,marginBottom:8},

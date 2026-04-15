@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { uploadVendorDocument } from '../../api/apiClient';
 
 /**
  * DocumentUploader
@@ -28,33 +29,44 @@ export const DocumentUploader = ({
       r.readAsDataURL(file);
     });
 
+  const uploadAndResolve = async (file) => {
+    try {
+      const res = await uploadVendorDocument(file);
+      const url = res?.data?.url || res?.data?.path;
+      if (url) return url;
+    } catch {
+      // fall back to base64 if upload endpoint is unavailable
+    }
+    return await toBase64(file);
+  };
+
   const handleFront = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const b64 = await toBase64(file);
-    onChange({ ...docs, [`${docKey}_front`]: b64 });
+    const value = await uploadAndResolve(file);
+    onChange({ ...docs, [`${docKey}_front`]: value });
     if (twoSided) setShowBack(true);
   };
 
   const handleBack = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const b64 = await toBase64(file);
-    onChange({ ...docs, [`${docKey}_back`]: b64 });
+    const value = await uploadAndResolve(file);
+    onChange({ ...docs, [`${docKey}_back`]: value });
     setShowBack(false);
   };
 
   const handleSingle = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const b64 = await toBase64(file);
-    onChange({ ...docs, [docKey]: b64 });
+    const value = await uploadAndResolve(file);
+    onChange({ ...docs, [docKey]: value });
   };
 
   const handleMultiple = async (e) => {
     const files = Array.from(e.target.files);
     const existing = docs[docKey] || [];
-    const newOnes  = await Promise.all(files.map(f => toBase64(f)));
+    const newOnes  = await Promise.all(files.map(f => uploadAndResolve(f)));
     onChange({ ...docs, [docKey]: [...existing, ...newOnes] });
   };
 

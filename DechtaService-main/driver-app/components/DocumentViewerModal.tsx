@@ -153,25 +153,6 @@ export default function DocumentViewerModal({
           </View>
         )}
 
-        {/* Full Image Viewer */}
-      <Modal visible={showFullImage !== null} transparent={true} animationType="fade">
-        <View style={styles.fullImageContainer}>
-          <TouchableOpacity
-            style={styles.closeFullImage}
-            onPress={() => setShowFullImage(null)}
-          >
-            <Feather name="x" size={28} color="#fff" />
-          </TouchableOpacity>
-          {showFullImage && (
-            <Image
-              source={{ uri: showFullImage }}
-              style={styles.fullImage}
-              resizeMode="contain"
-            />
-          )}
-        </View>
-      </Modal>
-
       <View style={[styles.container, themeStyles.container]}>
         {/* Header */}
         <View style={[styles.header, themeStyles.header]}>
@@ -342,6 +323,25 @@ export default function DocumentViewerModal({
             </TouchableOpacity>
           </View>
         )}
+
+        {/* Full Image Viewer Overlay (web-safe; avoids nested Modal) */}
+        {showFullImage && (
+          <View style={styles.fullImageOverlay}>
+            <View style={styles.fullImageContainer}>
+              <TouchableOpacity
+                style={styles.closeFullImage}
+                onPress={() => setShowFullImage(null)}
+              >
+                <Feather name="x" size={28} color="#fff" />
+              </TouchableOpacity>
+              <Image
+                source={{ uri: showFullImage }}
+                style={styles.fullImage}
+                resizeMode="contain"
+              />
+            </View>
+          </View>
+        )}
       </View>
     </Modal>
     </>
@@ -382,6 +382,10 @@ const styles = StyleSheet.create({
   placeholderBox: { padding: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 8 },
   placeholderText: { fontSize: 13, fontWeight: '500' },
 
+  fullImageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2000,
+  },
   fullImageContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   closeFullImage: { position: 'absolute', top: 40, right: 20, zIndex: 100, width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   fullImage: { width: '90%', height: '90%' },

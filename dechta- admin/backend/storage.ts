@@ -158,6 +158,9 @@ async function ensureAdminOnboardingCompatibilitySchema(): Promise<void> {
     await pool.query(`ALTER TABLE driver_profiles ADD COLUMN IF NOT EXISTS vehicle_type VARCHAR(50)`).catch(() => ({ rows: [] as any[] }));
     await pool.query(`ALTER TABLE driver_profiles ADD COLUMN IF NOT EXISTS vehicle_number VARCHAR(50)`).catch(() => ({ rows: [] as any[] }));
     await pool.query(`ALTER TABLE driver_profiles ADD COLUMN IF NOT EXISTS license_number VARCHAR(100)`).catch(() => ({ rows: [] as any[] }));
+    await pool.query(`ALTER TABLE driver_profiles ADD COLUMN IF NOT EXISTS preferred_zone VARCHAR(120)`).catch(() => ({ rows: [] as any[] }));
+    await pool.query(`ALTER TABLE driver_profiles ADD COLUMN IF NOT EXISTS rating NUMERIC(3,2) DEFAULT 0`).catch(() => ({ rows: [] as any[] }));
+    await pool.query(`ALTER TABLE driver_profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT`).catch(() => ({ rows: [] as any[] }));
   }
 
   if (await tableExistsInPublic('driver_vehicles')) {
@@ -951,10 +954,10 @@ export class DatabaseStorage implements IStorage {
           SELECT
             g.latitude,
             g.longitude,
-            g.recorded_at
+            g.created_at AS recorded_at
           FROM driver_gps_locations g
           WHERE g.driver_id = dp.id
-          ORDER BY g.recorded_at DESC NULLS LAST, g.id DESC
+          ORDER BY g.created_at DESC NULLS LAST, g.id DESC
           LIMIT 1
         ) gps ON TRUE
       `
@@ -2293,7 +2296,49 @@ export class DatabaseStorage implements IStorage {
     ).catch(() => ({ rows: [] as any[] }));
 
     const userId = Number(profileRes.rows?.[0]?.user_id || 0);
-    if (!userId) return undefined;
+
+    const settingRows = (await pool.query(
+      `SELECT key, value
+       FROM app_settings
+       WHERE key = ANY($1)`,
+      [[
+        `vendor_profile_${vendorId}`,
+        `vendor_company_${vendorId}`,
+        `vendor_bank_${vendorId}`,
+        `vendor_address_${vendorId}`,
+        `vendor_documents_${vendorId}`,
+      ]]
+    ).catch(() => ({ rows: [] as any[] }))).rows || [];
+
+    const parseSettingJson = (key: string) => {
+      const row = settingRows.find((r: any) => String(r?.key || '') === key);
+      if (!row?.value) return null;
+      try {
+        return JSON.parse(String(row.value));
+      } catch {
+        return null;
+      }
+    };
+
+    const profileDetails = parseSettingJson(`vendor_profile_${vendorId}`);
+    const companyDetails = parseSettingJson(`vendor_company_${vendorId}`);
+    const bankDetails = parseSettingJson(`vendor_bank_${vendorId}`);
+    const addressDetails = parseSettingJson(`vendor_address_${vendorId}`);
+    const rawDocuments = parseSettingJson(`vendor_documents_${vendorId}`) || {};
+
+    if (!userId) {
+      return {
+        vendorId,
+        gstUrl: null,
+        panUrl: null,
+        aadharUrl: null,
+        businessLicenseUrl: null,
+        profileDetails,
+        companyDetails,
+        bankDetails,
+        addressDetails,
+      } as any;
+    }
 
     const docsRes = await pool.query(
       `
@@ -2361,18 +2406,36 @@ export class DatabaseStorage implements IStorage {
       return null;
     };
 
+    const pickFromRaw = (...keys: string[]) => {
+      for (const key of keys) {
+        const value = rawDocuments?.[key];
+        if (Array.isArray(value)) {
+          const first = String(value[0] || '').trim();
+          if (first) return first;
+        }
+        const text = String(value || '').trim();
+        if (text) return text;
+      }
+      return null;
+    };
+
     return {
       vendorId,
-      gstUrl: pickByType('gst', 'gst_certificate', 'gstin'),
-      panUrl: pickByType('pan', 'pan_card'),
-      aadharUrl: pickByType('aadhar', 'aadhaar'),
-      cancelledChequeUrl: pickByType('bank_proof', 'cancelled_cheque', 'passbook_cancelled_cheque', 'bank_details'),
-      gstCertificateUrl: pickByType('gst_certificate', 'gst', 'gstin'),
-      shopLicenseUrl: pickByType('shop_license', 'business_license', 'vendor_shop', 'registration_certificate'),
-      businessLicenseUrl: pickByType('business_license', 'shop_license', 'registration_certificate'),
-      panImageUrl: pickByType('pan_image', 'pan', 'pan_card'),
-      registrationCertificateUrl: pickByType('registration_certificate', 'business_license', 'shop_license'),
-      passbookCancelledChequeUrl: pickByType('passbook_cancelled_cheque', 'bank_proof', 'cancelled_cheque'),
+      gstUrl: pickByType('gst', 'gst_certificate', 'gstin') || pickFromRaw('gst_certificate'),
+      panUrl: pickByType('pan', 'pan_card') || pickFromRaw('pan_front', 'pan'),
+      aadharUrl: pickByType('aadhar', 'aadhaar') || pickFromRaw('aadhaar_front', 'aadhar_front', 'aadhaar', 'aadhar'),
+      cancelledChequeUrl: pickByType('bank_proof', 'cancelled_cheque', 'passbook_cancelled_cheque', 'bank_details') || pickFromRaw('bank_proofs', 'cancelled_cheque', 'passbook_cancelled_cheque'),
+      gstCertificateUrl: pickByType('gst_certificate', 'gst', 'gstin') || pickFromRaw('gst_certificate'),
+      shopLicenseUrl: pickByType('shop_license', 'business_license', 'vendor_shop', 'registration_certificate') || pickFromRaw('vendor_shop', 'registration_certificate'),
+      businessLicenseUrl: pickByType('business_license', 'shop_license', 'registration_certificate') || pickFromRaw('business_license', 'registration_certificate', 'vendor_shop'),
+      panImageUrl: pickByType('pan_image', 'pan', 'pan_card') || pickFromRaw('pan_front', 'pan'),
+      registrationCertificateUrl: pickByType('registration_certificate', 'business_license', 'shop_license') || pickFromRaw('registration_certificate', 'vendor_shop'),
+      passbookCancelledChequeUrl: pickByType('passbook_cancelled_cheque', 'bank_proof', 'cancelled_cheque') || pickFromRaw('bank_proofs', 'passbook_cancelled_cheque', 'cancelled_cheque'),
+      profileDetails,
+      companyDetails,
+      bankDetails,
+      addressDetails,
+      rawDocuments,
     } as VendorDocument;
   }
 

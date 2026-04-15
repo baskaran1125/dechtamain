@@ -1,7 +1,7 @@
 // src/controllers/ordersController.js
 const db = require('../config/database');
 const { uploadFile } = require('../services/uploadService');
-const { notifyOrderUpdate, broadcastNewOrderToOnlineDrivers } = require('../services/socketService');
+const { notifyOrderUpdate } = require('../services/socketService');
 const { calculateDeliveryCharge, toFiniteNumber } = require('../services/pricingService');
 
 const tableColumnsCache = new Map();
@@ -165,7 +165,7 @@ async function getAvailableOrders(request, reply) {
        FROM orders o
        WHERE LOWER(COALESCE(o.status::text, '')) = 'pending'
          AND o.driver_id IS NULL
-         ${hasVendorStatusColumn ? "AND LOWER(COALESCE(o.v_status::text, 'pending')) = 'accept'" : ''}
+         ${hasVendorStatusColumn ? "AND LOWER(COALESCE(o.v_status::text, 'pending')) IN ('accepted', 'accept')" : ''}
          AND (
            o.vehicle_type IS NULL OR o.vehicle_type = '' OR 
            LOWER(TRIM(o.vehicle_type)) = $1 OR
@@ -934,11 +934,9 @@ async function createOrder(request, reply) {
 
     const newOrder = await db.insert('orders', orderPayload);
 
-    await broadcastNewOrderToOnlineDrivers(newOrder, db);
-
     return reply.code(201).send({
       success: true,
-      message: 'Order created and broadcasted to online drivers',
+      message: 'Order created. It will be visible to drivers after vendor acceptance.',
       data:    newOrder,
     });
   } catch (error) {

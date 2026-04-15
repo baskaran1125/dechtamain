@@ -103,9 +103,6 @@ const resolveOrderImage = (order, products = []) => {
 };
 
 const normalizeOrderStatus = (order) => {
-  const vendorStatus = String(order?.v_status || '').trim().toLowerCase();
-  if (vendorStatus === 'accept') return 'assigned';
-
   const raw = String(order?.normalized_status || order?.normalizedStatus || order?.status || '').trim().toLowerCase();
   if (!raw) return 'pending';
   if (['pending', 'placed'].includes(raw)) return 'pending';
@@ -172,8 +169,13 @@ const OrdersPage = ({ orders=[], onUpdateStatus, notify, products, vendor }) => 
   });
   const filtered  = withStatus.filter(o => o.uiStatus === filter);
   const recent    = [...withStatus].sort((a,b)=>String(b.id).localeCompare(String(a.id))).slice(0,5);
-  const getNext   = s => s==='Pending' ? 'Accept' : s==='Live' ? 'Delivered → Complete' : 'Completed';
-  const nextStatus= s => s==='Pending' ? 'accepted' : 'delivered';
+  const getActionConfig = (order) => {
+    const vendorAccepted = ['accepted', 'accept'].includes(String(order?.v_status || '').trim().toLowerCase());
+    if (order?.uiStatus === 'Pending' && !vendorAccepted) {
+      return { label: 'Accept', nextStatus: 'accepted' };
+    }
+    return null;
+  };
 
   return (
     <div className="p-6 space-y-6 fade-in">
@@ -224,17 +226,22 @@ const OrdersPage = ({ orders=[], onUpdateStatus, notify, products, vendor }) => 
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <div className="text-xl font-bold text-[#0ceded]">₹ {Number(o.totalAmount).toLocaleString()}</div>
-                  <div className="flex items-center gap-2">
-                    {(o.uiStatus==='Live'||o.uiStatus==='Completed') && (
-                      <button onClick={() => setInvoice(o)} className="bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1"><Icons.Receipt /> Invoice</button>
-                    )}
-                    {o.uiStatus!=='Completed' && (
-                      <button onClick={() => { onUpdateStatus(o.id, nextStatus(o.uiStatus)); notify(`Order moved to ${nextStatus(o.uiStatus)}`,'success'); }}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-[10px] font-bold shadow-lg shadow-blue-500/20">
-                        {getNext(o.uiStatus)}
-                      </button>
-                    )}
-                  </div>
+                  {getActionConfig(o) && (
+                    <button
+                      onClick={() => {
+                        const action = getActionConfig(o);
+                        if (!action) return;
+                        onUpdateStatus(o.id, action.nextStatus);
+                        notify(`Order updated: ${action.label}`, 'success');
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-[11px] font-bold shadow-lg shadow-blue-500/20"
+                    >
+                      {getActionConfig(o)?.label}
+                    </button>
+                  )}
+                  {(o.uiStatus==='Live'||o.uiStatus==='Completed') && (
+                    <button onClick={() => setInvoice(o)} className="bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1"><Icons.Receipt /> Invoice</button>
+                  )}
                 </div>
               </div>
             </Card>

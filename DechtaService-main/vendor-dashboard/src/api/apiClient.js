@@ -42,6 +42,14 @@ export const sendOTP       = (phone)        => api.post('/vendors/auth/send-otp'
 export const loginAPI      = (phone, otp)   => api.post('/vendors/auth/verify-otp', { phone, otp });
 export const registerAPI   = (data)         => api.post('/vendors/auth/register', data);
 
+export const uploadVendorDocument = (file) => {
+  const form = new FormData();
+  form.append('file', file);
+  return api.post('/vendors/upload-document', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+
 export const getProfile    = ()     => api.get('/vendors/me');
 export const updateProfile = (data) => api.put('/vendors/me', data);
 

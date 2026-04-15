@@ -81,9 +81,8 @@ function normalizeDocUrl(url: string | null | undefined): string | null {
                 .replace(/localhost:\d+/g, "localhost:5000")
                 .replace(/127\.0\.0\.1:\d+/g, "127.0.0.1:5000");
         }
-        return raw
-            .replace(/localhost:\d+/g, "localhost:5002")
-            .replace(/127\.0\.0\.1:\d+/g, "127.0.0.1:5002");
+        // Keep absolute vendor/admin URLs as-is; forcing ports causes broken previews.
+        return raw;
     }
 
     if (normalizedPath.startsWith("/uploads/driver-documents/")) {
@@ -94,6 +93,13 @@ function normalizeDocUrl(url: string | null | undefined): string | null {
     }
     if (normalizedPath.startsWith("/driver-documents/")) {
         return `http://127.0.0.1:5000/uploads${normalizedPath}`;
+    }
+
+    if (normalizedPath.includes("vendor-documents")) {
+        if (raw.startsWith("/uploads/")) return `http://127.0.0.1:5000${raw}`;
+        if (raw.startsWith("uploads/")) return `http://127.0.0.1:5000/${raw}`;
+        if (raw.startsWith("/")) return `http://127.0.0.1:5000${raw}`;
+        return `http://127.0.0.1:5000/uploads/${raw}`;
     }
 
     if (raw.startsWith("/uploads/")) return `http://127.0.0.1:5002${raw}`;
@@ -433,13 +439,60 @@ export default function OnboardingPage({
             : null;
 
         const docs = vendorDocs.data;
+        const profileDetails = (docs?.profileDetails && typeof docs.profileDetails === "object") ? docs.profileDetails : {};
+        const companyDetails = (docs?.companyDetails && typeof docs.companyDetails === "object") ? docs.companyDetails : {};
+        const bankDetails = (docs?.bankDetails && typeof docs.bankDetails === "object") ? docs.bankDetails : {};
+        const addressDetails = (docs?.addressDetails && typeof docs.addressDetails === "object") ? docs.addressDetails : {};
+
+        const detailSections = [
+            {
+                title: "Profile Details",
+                rows: [
+                    ["Full Name", profileDetails?.name || selectedVendor.ownerName || "N/A"],
+                    ["Phone", profileDetails?.phone || selectedVendor.phone || "N/A"],
+                    ["WhatsApp", profileDetails?.whatsapp || profileDetails?.whatsappNumber || selectedVendor.whatsappNumber || "N/A"],
+                    ["Aadhaar Number", profileDetails?.aadhaar || profileDetails?.aadhar || "N/A"],
+                    ["PAN Number", profileDetails?.pan || "N/A"],
+                ],
+            },
+            {
+                title: "Company Details",
+                rows: [
+                    ["Company Name", companyDetails?.companyName || selectedVendor.shopName || selectedVendor.name || "N/A"],
+                    ["Business Type", companyDetails?.businessType || selectedVendor.businessType || "N/A"],
+                    ["GST Number", companyDetails?.gst || selectedVendor.gstNumber || "N/A"],
+                    ["Years of Experience", companyDetails?.yearsOfBusinessExperience || selectedVendor.yearsOfBusinessExperience || "N/A"],
+                    ["Email", companyDetails?.email || selectedVendor.email || "N/A"],
+                ],
+            },
+            {
+                title: "Bank Details",
+                rows: [
+                    ["Bank Name", bankDetails?.bankName || "N/A"],
+                    ["Account Number", bankDetails?.accountNo || bankDetails?.accountNumber || "N/A"],
+                    ["IFSC", bankDetails?.ifsc || "N/A"],
+                    ["Branch", bankDetails?.bankBranch || "N/A"],
+                ],
+            },
+            {
+                title: "Address Details",
+                rows: [
+                    ["Shop Address", selectedVendor.shopAddress || selectedVendor.businessAddress || addressDetails?.address || "N/A"],
+                    ["Warehouse Address", selectedVendor.warehouseAddress || "N/A"],
+                    ["Location Label", addressDetails?.locationLabel || selectedVendor.locationLabel || selectedVendor.googleMapsLocation || "N/A"],
+                    ["Latitude", addressDetails?.latitude ?? selectedVendor.shopLatitude ?? "N/A"],
+                    ["Longitude", addressDetails?.longitude ?? selectedVendor.shopLongitude ?? "N/A"],
+                ],
+            },
+        ];
+
         const vendorDocFields = [
             { key: "gst", label: "GST Certificate", icon: Building2, url: normalizeDocUrl(docs?.gstUrl), hint: "Verify GST number and business name match." },
             { key: "passbook_cancelled_cheque", label: "Passbook / Cancelled Cheque", icon: CreditCard, url: normalizeDocUrl(docs?.cancelledChequeUrl), hint: "Validate account holder details and cheque/passbook clarity." },
             { key: "pan_image", label: "PAN Image", icon: CreditCard, url: normalizeDocUrl(docs?.panImageUrl), hint: "Verify PAN card details and clarity." },
             { key: "registration_certificate", label: "Registration Certificate", icon: FileText, url: normalizeDocUrl(docs?.registrationCertificateUrl), hint: "Verify business registration certificate." },
             { key: "vendor_shop", label: "Vendor Shop", icon: Building2, url: normalizeDocUrl(docs?.shopLicenseUrl), hint: "Verify shop photo and storefront visibility." },
-            { key: "vendor_photo", label: "Vendor Photo", icon: Users, url: normalizeDocUrl(docs?.panUrl), hint: "Confirm the owner or vendor profile photo is clear." },
+            { key: "vendor_pan", label: "PAN Card", icon: IdCard, url: normalizeDocUrl(docs?.panUrl), hint: "Confirm PAN number and legal name are readable." },
             { key: "aadhar", label: "Aadhar Proof", icon: IdCard, url: normalizeDocUrl(docs?.aadharUrl), hint: "Check for clear photo and matching name." },
         ];
 
@@ -475,42 +528,6 @@ export default function OnboardingPage({
                         </div>
                         <div className="space-y-4">
                             <div>
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Email</p>
-                                <p className="text-sm font-semibold text-gray-900">{selectedVendor.email}</p>
-                            </div>
-                            <div>
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Phone</p>
-                                <p className="text-sm font-semibold text-gray-900">{selectedVendor.phone || "N/A"}</p>
-                            </div>
-                            <div>
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Owner Name</p>
-                                <p className="text-sm font-semibold text-gray-900">{selectedVendor.ownerName || "N/A"}</p>
-                            </div>
-                            <div>
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">WhatsApp</p>
-                                <p className="text-sm font-semibold text-gray-900">{selectedVendor.whatsappNumber || "N/A"}</p>
-                            </div>
-                            <div>
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Business Type</p>
-                                <p className="text-sm font-semibold text-gray-900">{selectedVendor.businessType || "N/A"}</p>
-                            </div>
-                            <div>
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Experience</p>
-                                <p className="text-sm font-semibold text-gray-900">{selectedVendor.yearsOfBusinessExperience ? `${selectedVendor.yearsOfBusinessExperience} years` : "N/A"}</p>
-                            </div>
-                            <div>
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">GST Number</p>
-                                <p className="text-sm font-semibold text-gray-900">{selectedVendor.gstNumber || "N/A"}</p>
-                            </div>
-                            <div>
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Business Address</p>
-                                <p className="text-sm font-semibold text-gray-900 break-words">{vendorAddressLine || "N/A"}</p>
-                            </div>
-                            <div>
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Warehouse Address</p>
-                                <p className="text-sm font-semibold text-gray-900 break-words">{selectedVendor.warehouseAddress || "N/A"}</p>
-                            </div>
-                            <div>
                                 <div className="flex items-center justify-between gap-2 mb-1">
                                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Location</p>
                                     <Button
@@ -535,6 +552,19 @@ export default function OnboardingPage({
                                     <p className="text-[10px] text-gray-500 mt-1">Lat: {vendorLat?.toFixed(6)}, Lng: {vendorLng?.toFixed(6)}</p>
                                 )}
                             </div>
+                            {detailSections.map((section) => (
+                                <div key={section.title} className="rounded-xl border border-gray-200 p-3">
+                                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-gray-500 mb-2">{section.title}</h4>
+                                    <div className="space-y-2">
+                                        {section.rows.map(([label, value]) => (
+                                            <div key={`${section.title}-${label}`} className="grid grid-cols-2 gap-2">
+                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{label}</p>
+                                                <p className="text-xs font-semibold text-gray-900 break-words text-right">{String(value || "N/A")}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
                             <div>
                                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Applied On</p>
                                 <p className="text-sm font-semibold text-gray-900">

@@ -17,10 +17,47 @@ const GST_RATES = {
   'Other':             18,
 };
 
+async function vendorCanAccessCatalog(vendorId) {
+  const result = await db.query(
+    `SELECT
+       vp.verification_status AS profile_verification_status,
+       u.verification_status AS user_verification_status,
+       u.is_approved
+     FROM vendor_profiles vp
+     LEFT JOIN users u ON u.id = vp.user_id
+     WHERE vp.id = $1
+     LIMIT 1`,
+    [vendorId]
+  ).catch(() => ({ rows: [] }));
+
+  const row = result.rows[0];
+  if (!row) return false;
+
+  const profileStatus = String(row.profile_verification_status || '').toLowerCase();
+  const userStatus = String(row.user_verification_status || '').toLowerCase();
+  if (profileStatus === 'verified' || userStatus === 'verified' || row.is_approved === true) {
+    return true;
+  }
+  return false;
+}
+
+async function ensureCatalogAccess(request, reply) {
+  const allowed = await vendorCanAccessCatalog(request.vendor.id);
+  if (!allowed) {
+    reply.code(403).send({
+      success: false,
+      message: 'Your account is pending admin approval. Catalog access is locked until verification.',
+    });
+    return false;
+  }
+  return true;
+}
+
 // ──────────────────────────────────────────────────────────────
 // GET /api/products
 // ──────────────────────────────────────────────────────────────
 async function getProducts(request, reply) {
+  if (!(await ensureCatalogAccess(request, reply))) return;
   try {
     const result = await db.query(
       `SELECT
@@ -44,6 +81,7 @@ async function getProducts(request, reply) {
 // POST /api/products
 // ──────────────────────────────────────────────────────────────
 async function createProduct(request, reply) {
+  if (!(await ensureCatalogAccess(request, reply))) return;
   const {
     name, description, category, selling_price, mrp, stock_quantity, unit,
     weight_kg, images, gst_percent, brand, detailed_description, warranty,
@@ -96,6 +134,7 @@ async function createProduct(request, reply) {
 // PUT /api/products/:id
 // ──────────────────────────────────────────────────────────────
 async function updateProduct(request, reply) {
+  if (!(await ensureCatalogAccess(request, reply))) return;
   const { id } = request.params;
   const updates = {};
   const body = request.body;
@@ -155,6 +194,7 @@ async function updateProduct(request, reply) {
 // PATCH /api/products/:id/toggle
 // ──────────────────────────────────────────────────────────────
 async function toggleProductActive(request, reply) {
+  if (!(await ensureCatalogAccess(request, reply))) return;
   const { id } = request.params;
   try {
     const result = await db.query(
@@ -174,6 +214,7 @@ async function toggleProductActive(request, reply) {
 // PATCH /api/products/:id/boost
 // ──────────────────────────────────────────────────────────────
 async function boostProduct(request, reply) {
+  if (!(await ensureCatalogAccess(request, reply))) return;
   const { id } = request.params;
   try {
     const result = await db.query(
@@ -193,6 +234,7 @@ async function boostProduct(request, reply) {
 // GET /api/products/gst/by-category?category=Electronics
 // ──────────────────────────────────────────────────────────────
 async function getGstByCategory(request, reply) {
+  if (!(await ensureCatalogAccess(request, reply))) return;
   const { category } = request.query;
   const rate = GST_RATES[category] ?? GST_RATES['Other'];
   return reply.send({ success: true, category, gst_rate: rate });

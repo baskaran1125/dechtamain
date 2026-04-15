@@ -4,12 +4,18 @@ export const Sidebar = ({ view, setView, vendor, onLogout, navItems }) => (
     <div className="p-6"><Logo /></div>
     <nav className="flex-1 px-4 space-y-2 overflow-y-auto no-scrollbar py-4">
       {navItems.map(item => (
-        <button key={item.id} onClick={() => setView(item.id)}
+        <button key={item.id} onClick={() => !item.disabled && setView(item.id)}
+          disabled={!!item.disabled}
+          title={item.disabled ? (item.disabledReason || 'Locked') : undefined}
           className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-extrabold tracking-wide uppercase transition-all duration-300 ${
             view===item.id
               ? 'bg-[#0ceded] text-black shadow-lg shadow-cyan-500/20 transform scale-105'
-              : 'text-white hover:bg-white/10 hover:pl-6'}`}>
-          <span className="text-lg">{item.icon}</span>{item.label}
+              : item.disabled
+                ? 'text-gray-500 cursor-not-allowed opacity-70'
+                : 'text-white hover:bg-white/10 hover:pl-6'}`}>
+          <span className="text-lg">{item.icon}</span>
+          <span className="flex-1 text-left">{item.label}</span>
+          {item.disabled && <span className="text-[10px] text-yellow-300">LOCKED</span>}
         </button>
       ))}
     </nav>
