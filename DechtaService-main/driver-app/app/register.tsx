@@ -149,6 +149,18 @@ export default function RegisterScreen() {
       return;
     }
 
+    if ((regData.vehicleType === '3wheeler' || regData.vehicleType === '4wheeler') && !regData.specificModelId) {
+      if (Platform.OS === 'web') { window.alert('Vehicle Model Missing\n\nPlease select a vehicle model.'); }
+      else { Alert.alert('Vehicle Model Missing', 'Please select a vehicle model.'); }
+      return;
+    }
+
+    if ((regData.vehicleType === '3wheeler' || regData.vehicleType === '4wheeler') && !regData.bodyType) {
+      if (Platform.OS === 'web') { window.alert('Body Type Missing\n\nPlease select body type (Open or Closed).'); }
+      else { Alert.alert('Body Type Missing', 'Please select body type (Open or Closed).'); }
+      return;
+    }
+
     // Documents are optional during registration on web (no camera access)
     // They can be uploaded later from Profile > Documents
     // On native app, validate if any document was partially uploaded
@@ -181,23 +193,26 @@ export default function RegisterScreen() {
       }
 
       // 2. Upload KYC documents (both front and back)
-      const docUploads = [
-        { key: 'aadharFile', type: 'aadhar', data: regData.aadharFile },
-        { key: 'panFile', type: 'pan', data: regData.panFile },
-        { key: 'licenseFile', type: 'license', data: regData.licenseFile },
-        { key: 'rcFile', type: 'rc', data: regData.rcFile },
-      ];
-      
-      for (const doc of docUploads) {
-        if (doc.data.front || doc.data.back) {
-          try {
-            // Send both front and back images
-            await DriverAPI.uploadDocument(
-              [doc.data.front, doc.data.back],
-              doc.type
-            );
-          } catch (e) {
-            console.warn(`${doc.type} upload failed:`, e);
+      // On web this step is optional and skipped to avoid blocking registration.
+      if (Platform.OS !== 'web') {
+        const docUploads = [
+          { key: 'aadharFile', type: 'aadhar', data: regData.aadharFile },
+          { key: 'panFile', type: 'pan', data: regData.panFile },
+          { key: 'licenseFile', type: 'license', data: regData.licenseFile },
+          { key: 'rcFile', type: 'rc', data: regData.rcFile },
+        ];
+
+        for (const doc of docUploads) {
+          if (doc.data.front || doc.data.back) {
+            try {
+              // Send both front and back images
+              await DriverAPI.uploadDocument(
+                [doc.data.front, doc.data.back],
+                doc.type
+              );
+            } catch (e) {
+              console.warn(`${doc.type} upload failed:`, e);
+            }
           }
         }
       }
@@ -213,6 +228,22 @@ export default function RegisterScreen() {
         bankBranch: regData.bankBranch,
       });
 
+      const safeVehicleData = regData.vehicleType === '2wheeler'
+        ? {
+            specificModelId: regData.specificModelId || TWOWHEELER_DEFAULTS.specificModelId,
+            vehicleModelName: regData.vehicleModelName || TWOWHEELER_DEFAULTS.vehicleModelName,
+            vehicleWeight: regData.vehicleWeight || TWOWHEELER_DEFAULTS.vehicleWeight,
+            vehicleDimensions: regData.vehicleDimensions || TWOWHEELER_DEFAULTS.vehicleDimensions,
+            bodyType: regData.bodyType || TWOWHEELER_DEFAULTS.bodyType,
+          }
+        : {
+            specificModelId: regData.specificModelId,
+            vehicleModelName: regData.vehicleModelName,
+            vehicleWeight: regData.vehicleWeight,
+            vehicleDimensions: regData.vehicleDimensions,
+            bodyType: regData.bodyType,
+          };
+
       const result = await DriverAPI.register({
         fullName: regData.fullName,
         // Convert DD/MM/YYYY → YYYY-MM-DD for backend
@@ -221,11 +252,11 @@ export default function RegisterScreen() {
         bloodGroup: regData.bloodGroup,
         preferredZone: regData.preferredZone,
         vehicleType: regData.vehicleType,
-        specificModelId: regData.specificModelId,
-        vehicleModelName: regData.vehicleModelName,
-        vehicleWeight: regData.vehicleWeight,
-        vehicleDimensions: regData.vehicleDimensions,
-        bodyType: regData.bodyType,
+        specificModelId: safeVehicleData.specificModelId,
+        vehicleModelName: safeVehicleData.vehicleModelName,
+        vehicleWeight: safeVehicleData.vehicleWeight,
+        vehicleDimensions: safeVehicleData.vehicleDimensions,
+        bodyType: safeVehicleData.bodyType,
         vehicleNumber: regData.vehicleNumber,
         accountHolder: regData.accountHolder,
         bankAccount: regData.bankAccount,

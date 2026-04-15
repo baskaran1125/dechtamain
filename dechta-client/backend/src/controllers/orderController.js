@@ -74,6 +74,80 @@ const toNumberOrNull = (value) => {
   return Number.isFinite(n) ? n : null;
 };
 
+const normalizeVehicleType = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  const map = {
+    '2w': '2w',
+    '2wheeler': '2w',
+    '2-wheeler': '2w',
+    '2 wheeler': '2w',
+    bike: '2w',
+    motorcycle: '2w',
+    '3w': '3w',
+    '3wheeler': '3w',
+    '3-wheeler': '3w',
+    '3 wheeler': '3w',
+    auto: '3w',
+    'auto rickshaw': '3w',
+    '4w': '4w',
+    '4wheeler': '4w',
+    '4-wheeler': '4w',
+    '4 wheeler': '4w',
+    truck: '4w',
+    van: '4w',
+  };
+  return map[normalized] || null;
+};
+
+const VEHICLE_MODEL_TO_CAPACITY_KG = {
+  '2w_standard': 20,
+  '3w_500kg': 500,
+  '4w_750kg': 750,
+  '4w_1200kg': 1200,
+  '4w_1700kg': 1700,
+  '4w_2500kg': 2500,
+};
+
+const VEHICLE_TYPE_DEFAULT_MODEL = {
+  '2w': '2w_standard',
+  '3w': '3w_500kg',
+};
+
+const normalizeModelId = (modelId, vehicleType) => {
+  const raw = String(modelId || '').trim().toLowerCase();
+  const legacyAlias = {
+    '3w_standard': '3w_500kg',
+    '4w_14ton': '4w_1200kg',
+    '4w_17ton': '4w_1700kg',
+    '4w_25ton': '4w_2500kg',
+  };
+
+  if (raw && legacyAlias[raw]) return legacyAlias[raw];
+  if (raw && VEHICLE_MODEL_TO_CAPACITY_KG[raw]) return raw;
+  return VEHICLE_TYPE_DEFAULT_MODEL[vehicleType] || (raw || null);
+};
+
+const resolveRequestedWeightKg = (vehicle, modelId, vehicleType) => {
+  const modelWeight = VEHICLE_MODEL_TO_CAPACITY_KG[modelId || ''];
+  if (modelWeight != null) return modelWeight;
+
+  const explicitWeight = toNumberOrNull(vehicle?.weight_capacity_kg ?? vehicle?.weight_capacity ?? vehicle?.capacity_kg);
+  if (explicitWeight != null) return explicitWeight;
+
+  // Legacy fallback: parse any number from option label if older clients still send only text.
+  const parsedFromName = toNumberOrNull(String(vehicle?.option_name || '').replace(/[^0-9.]/g, ''));
+  if (parsedFromName != null) return parsedFromName;
+
+  if (vehicleType === '2w') return 20;
+  if (vehicleType === '3w') return 500;
+  return null;
+};
+
+const resolveBodyType = (vehicleType) => {
+  if (vehicleType === '2w' || vehicleType === '3w') return 'Open';
+  return null;
+};
+
 const toJsonOrNull = (value) => {
   if (value == null) return null;
   try {
@@ -195,7 +269,10 @@ const createOrder = asyncHandler(async (req, res) => {
     const deliveryDistanceFromClient = toNumberOrNull(delivery_distance_km);
     const deliveryPricingFromClient = delivery_pricing || null;
     const tipAmount = toNumberOrNull(tip) ?? 0;
-    const selectedVehicleType = String(vehicle?.type || '').toLowerCase();
+    const selectedVehicleType = normalizeVehicleType(vehicle?.type || vehicle?.name);
+    const requestedModelId = normalizeModelId(vehicle?.option_id, selectedVehicleType);
+    const requestedWeight = resolveRequestedWeightKg(vehicle, requestedModelId, selectedVehicleType);
+    const requestedBodyType = resolveBodyType(selectedVehicleType);
     const selectedOptionPremium = Math.max(
       0,
       toNumberOrNull(vehicle?.option_premium)
@@ -318,7 +395,6 @@ const createOrder = asyncHandler(async (req, res) => {
           pickupLng = pickupLng ?? toNumberOrNull(vendorRows[0].shop_longitude) ?? toNumberOrNull(vendorRows[0].business_longitude);
         }
       }
-      const requestedWeight = toNumberOrNull(String(vehicle?.option_name || '').replace(/[^0-9.]/g, ''));
       let computedDeliveryFee = deliveryFeeFromClient;
       let computedDistanceKm = deliveryDistanceFromClient;
       let computedDeliveryPricing = deliveryPricingFromClient;
@@ -373,15 +449,15 @@ const createOrder = asyncHandler(async (req, res) => {
       addColumnValue(dbCols, dbVals, orderColumns, 'vendor_shop_name', item?.shop_name || null);
       addColumnValue(dbCols, dbVals, orderColumns, 'pickup_address', item?.shop_name || null);
       addColumnValue(dbCols, dbVals, orderColumns, 'delivery_address', compactAddressText(delivery_address || ''));
-      addColumnValue(dbCols, dbVals, orderColumns, 'vehicle_type', vehicle?.type || null);
+      addColumnValue(dbCols, dbVals, orderColumns, 'vehicle_type', selectedVehicleType || vehicle?.type || null);
       addColumnValue(dbCols, dbVals, orderColumns, 'vehicle_option_id', vehicle?.option_id || null);
       addColumnValue(dbCols, dbVals, orderColumns, 'vehicle_name', vehicle?.name || vehicle?.option_name || null);
       addColumnValue(dbCols, dbVals, orderColumns, 'vehicle_desc', vehicle?.option_desc || null);
-      addColumnValue(dbCols, dbVals, orderColumns, 'model_id_requested', vehicle?.option_id || null);
+      addColumnValue(dbCols, dbVals, orderColumns, 'model_id_requested', requestedModelId);
       addColumnValue(dbCols, dbVals, orderColumns, 'model_name_requested', vehicle?.option_name || null);
       addColumnValue(dbCols, dbVals, orderColumns, 'weight_capacity_requested', requestedWeight);
       addColumnValue(dbCols, dbVals, orderColumns, 'dimensions_requested', vehicle?.option_desc || null);
-      addColumnValue(dbCols, dbVals, orderColumns, 'body_type_requested', vehicle?.type === '2w' ? 'Open' : null);
+      addColumnValue(dbCols, dbVals, orderColumns, 'body_type_requested', requestedBodyType);
       addColumnValue(dbCols, dbVals, orderColumns, 'delivery_fee', computedDeliveryFee);
       addColumnValue(dbCols, dbVals, orderColumns, 'delivery_distance_km', computedDistanceKm);
       addColumnValue(dbCols, dbVals, orderColumns, 'delivery_pricing_json', toJsonOrNull(computedDeliveryPricing));

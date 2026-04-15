@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
+const apiProxyTarget = process.env.VITE_PROXY_TARGET || "http://localhost:5003";
+const wsProxyTarget = process.env.VITE_WS_PROXY_TARGET || "ws://localhost:5003";
+
 export default defineConfig({
   plugins: [
     react(),
@@ -34,12 +37,12 @@ export default defineConfig({
     port: 5174,
     proxy: {
       "/api": {
-        target: "http://localhost:5002",
+        target: apiProxyTarget,
         changeOrigin: false,
         secure: false,
       },
       "/ws": {
-        target: "ws://localhost:5002",
+        target: wsProxyTarget,
         ws: true,
         changeOrigin: false,
         secure: false,

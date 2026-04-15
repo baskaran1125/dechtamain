@@ -17,19 +17,54 @@ const InvoiceComponent = ({ order, vendor, products, onClose }) => {
 
   let itemsList = [];
   if (order.items) {
-    itemsList = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
-  } else {
+    try {
+      const parsed = typeof order.items === 'string' ? JSON.parse(order.items) : Array.isArray(order.items) ? order.items : [];
+      // Ensure each item has proper structure
+      itemsList = parsed.map(item => ({
+        ...item,
+        productName: item.productName || item.name || item.product_name || 'Item',
+        price: Number(item.price || item.unit_price || 0),
+        quantity: Number(item.quantity || item.qty || item.quantity || 1),
+        total: Number(item.total || item.amount || (Number(item.price || item.unit_price || 0) * Number(item.quantity || item.qty || 1)))
+      }));
+    } catch (e) {
+      itemsList = [];
+    }
+  }
+  
+  // If no items found, try to construct from order details
+  if (!itemsList || itemsList.length === 0) {
+    const qty = order.quantity || order.qty || 1;
+    const totalAmt = Number(order.totalAmount || order.total_amount || order.final_amount || order.price || 0);
+    const price = qty > 0 ? totalAmt / qty : 0;
+    
     itemsList = [{
-      productName: order.productName || 'Custom Item',
-      hsn: baseHsn,
-      price: Number(order.totalAmount || order.total_amount || 0) / (order.quantity || 1),
-      quantity: order.quantity || 1,
-      gst: baseGstPct,
-      total: Number(order.totalAmount || order.total_amount || 0)
+      productName: order.productName || order.name || 'Order Item',
+      name: order.productName || order.name || 'Order Item',
+      hsn: '8205',
+      price: price,
+      qty: qty,
+      quantity: qty,
+      gst: order.gstPercent || 18,
+      total: totalAmt
     }];
   }
 
-  const grandTotal = Number(order.totalAmount || order.total_amount || itemsList.reduce((s, i) => s + (Number(i.total) || 0), 0));
+  // Calculate grand total properly
+  let grandTotal = Number(order.totalAmount || order.total_amount || 0);
+  
+  // If still 0, calculate from items
+  if (grandTotal === 0 && itemsList && itemsList.length > 0) {
+    grandTotal = itemsList.reduce((sum, item) => {
+      const itemTotal = Number(item.total || (Number(item.price || 0) * Number(item.quantity || item.qty || 0)));
+      return sum + itemTotal;
+    }, 0);
+  }
+  
+  // If still 0 but we have order total_amount, use that
+  if (grandTotal === 0 && order.final_amount) {
+    grandTotal = Number(order.final_amount);
+  }
 
   // ── Dates ─────────────────────────────────────────────────────
   const orderDate   = formatDate(order.date || order.createdAt || order.orderDate);
@@ -119,9 +154,9 @@ const InvoiceComponent = ({ order, vendor, products, onClose }) => {
                       HSN: {item.hsn || baseHsn} &nbsp;|&nbsp; GST {item.gst || baseGstPct}% incl. in price
                     </div>
                   </td>
-                  <td className="p-2 border-r border-gray-300 text-right align-top">₹{Number(item.price).toFixed(2)}</td>
-                  <td className="p-2 border-r border-gray-300 text-center align-top">{item.quantity}</td>
-                  <td className="p-2 text-right align-top font-bold">₹{Number(item.total).toFixed(2)}</td>
+                  <td className="p-2 border-r border-gray-300 text-right align-top">₹{Number(item.price || 0).toFixed(2)}</td>
+                  <td className="p-2 border-r border-gray-300 text-center align-top">{Number(item.quantity || item.qty || 0)}</td>
+                  <td className="p-2 text-right align-top font-bold">₹{Number(item.total || (Number(item.price || 0) * Number(item.quantity || item.qty || 0))).toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>

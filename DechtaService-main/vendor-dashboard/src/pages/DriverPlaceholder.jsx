@@ -3,31 +3,46 @@ import { useState, useEffect } from 'react';
 const DRIVER_APP_URL = 'http://localhost:8081';
 
 export default function DriverPlaceholder({ onBack }) {
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [appAvailable, setAppAvailable] = useState(false);
+  const [checkCount, setCheckCount] = useState(0);
 
   useEffect(() => {
-    // Check if driver app is running
+    // Check if driver app is running with multiple attempts
     const checkApp = async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
       try {
-        const response = await fetch(DRIVER_APP_URL, { mode: 'no-cors' });
+        setIsLoading(true);
+        await fetch(`${DRIVER_APP_URL}`, {
+          method: 'GET',
+          mode: 'no-cors',
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+
+        // no-cors responses are opaque but successful if the app is reachable.
         setAppAvailable(true);
-        setIsLoading(false);
       } catch (err) {
+        console.log('Driver app not available:', err.message);
         setAppAvailable(false);
+      } finally {
+        clearTimeout(timeoutId);
         setIsLoading(false);
       }
     };
 
     checkApp();
-  }, []);
+  }, [checkCount]);
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-900 text-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin text-6xl mb-4">🚗</div>
-          <p className="text-xl">Checking driver app...</p>
+          <p className="text-xl">Checking driver app on port 8081...</p>
+          <p className="text-sm text-blue-200 mt-2">This may take a few seconds...</p>
         </div>
       </div>
     );
@@ -102,12 +117,11 @@ export default function DriverPlaceholder({ onBack }) {
 
           <button
             onClick={() => {
-              setIsLoading(true);
-              setTimeout(() => window.location.reload(), 1000);
+              setCheckCount(c => c + 1);
             }}
             className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition font-semibold w-full"
           >
-            🔄 Retry Loading
+            🔄 Retry Checking
           </button>
         </div>
       </div>

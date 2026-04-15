@@ -55,8 +55,7 @@ export default function RootLayout() {
       const isPublicRoute =
         !firstSegment ||
         firstSegment === 'login' ||
-        firstSegment === 'verify' ||
-        firstSegment === 'register';
+        firstSegment === 'verify';
 
       if (!isAuth && !isPublicRoute) {
         router.replace('/login');

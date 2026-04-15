@@ -1,33 +1,49 @@
 import { useState, useEffect } from 'react';
 
-const WORKER_APP_URL = 'http://localhost:5174';
+// Worker app runs on a dedicated port to avoid clashing with admin frontend.
+const WORKER_APP_URL = 'http://localhost:5176';
 
 export default function WorkerPlaceholder({ onBack }) {
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [appAvailable, setAppAvailable] = useState(false);
+  const [checkCount, setCheckCount] = useState(0);
 
   useEffect(() => {
-    // Check if worker app is running
+    // Check if worker app is running with multiple attempts
     const checkApp = async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
       try {
-        const response = await fetch(WORKER_APP_URL, { mode: 'no-cors' });
+        setIsLoading(true);
+        await fetch(`${WORKER_APP_URL}`, {
+          method: 'GET',
+          mode: 'no-cors',
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+
+        // no-cors responses are opaque but successful if the app is reachable.
         setAppAvailable(true);
-        setIsLoading(false);
       } catch (err) {
+        console.log('Worker app not available:', err.message);
         setAppAvailable(false);
+      } finally {
+        clearTimeout(timeoutId);
         setIsLoading(false);
       }
     };
 
     checkApp();
-  }, []);
+  }, [checkCount]);
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-orange-900 via-orange-800 to-orange-900 text-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin text-6xl mb-4">👷</div>
-          <p className="text-xl">Checking worker app...</p>
+          <p className="text-xl">Loading worker app...</p>
+          <p className="text-sm text-orange-200 mt-2">Port 5176</p>
         </div>
       </div>
     );
@@ -73,7 +89,7 @@ export default function WorkerPlaceholder({ onBack }) {
           <div className="text-6xl mb-4">👷</div>
           <h2 className="text-3xl font-bold mb-2">Worker App Not Running</h2>
           <p className="text-orange-200 mb-6">
-            The worker app needs to be started separately.
+            The worker app needs to be started separately on port 5176.
           </p>
 
           <div className="bg-orange-800/50 border border-orange-700 rounded-lg p-6 mb-6">
@@ -87,27 +103,26 @@ export default function WorkerPlaceholder({ onBack }) {
               </li>
               <li className="flex gap-2">
                 <span className="font-bold text-orange-300">2.</span>
-                <span>Run: <code className="bg-orange-950 px-2 py-1 rounded inline-block mt-1 w-full">cd worker-app && npm run dev</code></span>
+                <span>Run: <code className="bg-orange-950 px-2 py-1 rounded inline-block mt-1 w-full">cd DechtaService-main/worker-app && npm run dev</code></span>
               </li>
               <li className="flex gap-2">
                 <span className="font-bold text-orange-300">3.</span>
-                <span>Wait for the app to start on port <code className="bg-orange-950 px-2 py-1 rounded">5174</code></span>
+                <span>Wait for the app to start on port <code className="bg-orange-950 px-2 py-1 rounded">5176</code></span>
               </li>
               <li className="flex gap-2">
                 <span className="font-bold text-orange-300">4.</span>
-                <span>Come back and click "Back to Roles" then "Worker" again</span>
+                <span>Come back and click "Retry Checking" below</span>
               </li>
             </ol>
           </div>
 
           <button
             onClick={() => {
-              setIsLoading(true);
-              setTimeout(() => window.location.reload(), 1000);
+              setCheckCount(c => c + 1);
             }}
             className="px-6 py-3 bg-orange-600 hover:bg-orange-700 rounded-lg transition font-semibold w-full"
           >
-            🔄 Retry Loading
+            🔄 Retry Checking
           </button>
         </div>
       </div>

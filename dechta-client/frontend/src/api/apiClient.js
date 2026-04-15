@@ -7,9 +7,10 @@
 // ─────────────────────────────────────────────────────────────
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+export const CLIENT_TOKEN_KEY = 'dechta_client_token';
 
 function getToken() {
-  return localStorage.getItem('dechta_token');
+  return localStorage.getItem(CLIENT_TOKEN_KEY);
 }
 
 async function request(path, options = {}) {

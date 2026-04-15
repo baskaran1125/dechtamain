@@ -354,10 +354,14 @@ async function generateDeliveryOtp(orderId) {
   const otp = generateOtp();
 
   try {
-    await db.update('orders',
+    const result = await db.update('orders',
       { delivery_otp: otp },
       { id: orderId }   // bigint matching orders.id — NOT delivery_trips UUID
     );
+    // db.update() returns array of rows; check if at least one row was updated
+    if (!result || result.length === 0) {
+      throw new Error(`Order ${orderId} not found`);
+    }
     return otp;
   } catch (err) {
     console.error('[Generate Delivery OTP Error]', err);

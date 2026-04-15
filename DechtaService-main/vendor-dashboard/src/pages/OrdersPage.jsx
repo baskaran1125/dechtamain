@@ -21,6 +21,60 @@ const parseImages = (images) => {
   return [];
 };
 
+const parseJsonArray = (value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const parseJsonObject = (value) => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
+const getOrderProductName = (order) => {
+  const direct =
+    order?.productName ||
+    order?.product_name ||
+    order?.name ||
+    order?.product ||
+    order?.item_name;
+  if (direct && String(direct).trim()) return String(direct).trim();
+
+  const items = parseJsonArray(order?.items);
+  const firstItem = items[0] || {};
+  const itemName = firstItem?.productName || firstItem?.product_name || firstItem?.name || firstItem?.title;
+  if (itemName && String(itemName).trim()) return String(itemName).trim();
+
+  const orderDetails = parseJsonObject(order?.order_details);
+  const detailsItems = parseJsonArray(orderDetails?.items);
+  const firstDetailsItem = detailsItems[0] || {};
+  const detailsName =
+    firstDetailsItem?.productName ||
+    firstDetailsItem?.product_name ||
+    firstDetailsItem?.name ||
+    firstDetailsItem?.title;
+  if (detailsName && String(detailsName).trim()) return String(detailsName).trim();
+
+  return 'Order Item';
+};
+
+
 const resolveOrderImage = (order, products = []) => {
   const direct =
     order?.productImage ||
@@ -49,6 +103,9 @@ const resolveOrderImage = (order, products = []) => {
 };
 
 const normalizeOrderStatus = (order) => {
+  const vendorStatus = String(order?.v_status || '').trim().toLowerCase();
+  if (vendorStatus === 'accept') return 'assigned';
+
   const raw = String(order?.normalized_status || order?.normalizedStatus || order?.status || '').trim().toLowerCase();
   if (!raw) return 'pending';
   if (['pending', 'placed'].includes(raw)) return 'pending';
@@ -101,7 +158,7 @@ const OrdersPage = ({ orders=[], onUpdateStatus, notify, products, vendor }) => 
     const normalized = normalizeOrderStatus(o);
     return {
       ...o,
-      productName: o.productName || o.product_name || 'Product',
+      productName: getOrderProductName(o),
       quantity: toNumber(o.quantity ?? o.qty ?? 0),
       totalAmount: toNumber(o.totalAmount ?? o.total_amount ?? o.final_total ?? o.amount),
       date: o.date || o.orderDate || o.order_date || o.created_at || '-',
@@ -115,8 +172,8 @@ const OrdersPage = ({ orders=[], onUpdateStatus, notify, products, vendor }) => 
   });
   const filtered  = withStatus.filter(o => o.uiStatus === filter);
   const recent    = [...withStatus].sort((a,b)=>String(b.id).localeCompare(String(a.id))).slice(0,5);
-  const getNext   = s => s==='Pending' ? 'Accept → Live' : s==='Live' ? 'Delivered → Complete' : 'Completed';
-  const nextStatus= s => s==='Pending' ? 'in_transit' : 'delivered';
+  const getNext   = s => s==='Pending' ? 'Accept' : s==='Live' ? 'Delivered → Complete' : 'Completed';
+  const nextStatus= s => s==='Pending' ? 'accepted' : 'delivered';
 
   return (
     <div className="p-6 space-y-6 fade-in">

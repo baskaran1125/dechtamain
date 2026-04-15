@@ -51,7 +51,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      port: 5174,
+      port: 5176,
       proxy: {
         "/api": workerProxyTarget
       },

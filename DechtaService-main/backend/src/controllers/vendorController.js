@@ -223,6 +223,7 @@ async function ensureVendorCompatibilitySchema() {
       await db.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS dimensions_requested VARCHAR(100);`);
       await db.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_date TIMESTAMPTZ DEFAULT NOW();`);
       await db.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_otp VARCHAR(6);`);
+      await db.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS v_status VARCHAR(30) DEFAULT 'pending';`);
 
       await db.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS shop_latitude NUMERIC(10,8);`);
       await db.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS shop_longitude NUMERIC(11,8);`);
@@ -1051,22 +1052,31 @@ async function updateVendorOrderStatus(request, reply) {
     return reply.code(400).send({ success: false, message: 'status required' });
   }
 
+  const statusKey = String(status).trim().toLowerCase();
   const resolvedStatus = mapVendorStatusInput(status);
 
   try {
-    const result = await db.query(
-      `UPDATE orders SET status = $1, updated_at = NOW() 
-       WHERE id = $2 AND vendor_id = $3 RETURNING *`,
-      [resolvedStatus, orderId, request.vendor.id]
-    );
-    if (!result.rows[0]) {
+    // Vendor "accept" is controlled by v_status so client-facing status can remain pending until driver progresses.
+    const isVendorAcceptAction = ['accept', 'accepted'].includes(statusKey);
+    const rawUpdates = {
+      updated_at: new Date().toISOString(),
+      status: isVendorAcceptAction ? undefined : resolvedStatus,
+      v_status: isVendorAcceptAction ? 'accept' : undefined,
+    };
+
+    const filteredUpdates = await filterDataForTable('orders', rawUpdates);
+    const result = await db.update('orders', filteredUpdates, { id: orderId, vendor_id: request.vendor.id });
+
+    if (!result[0]) {
       return reply.code(404).send({ success: false, message: 'Order not found' });
     }
+
+    const updatedOrder = result[0];
     return reply.send({
       success: true,
       data: {
-        ...result.rows[0],
-        normalized_status: normalizeOrderStatus(result.rows[0].status),
+        ...updatedOrder,
+        normalized_status: normalizeOrderStatus(updatedOrder.status),
       }
     });
   } catch (err) {

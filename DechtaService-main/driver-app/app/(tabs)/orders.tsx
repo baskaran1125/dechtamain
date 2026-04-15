@@ -252,7 +252,7 @@ export default function OrdersScreen() {
         const normalized = (result.data || []).map((o: any) => ({
           id: String(o.id),
           type: o.product_name || o.order_type || 'Delivery',
-          vehicle_type: o.vehicle_type || '2 Wheeler',
+          vehicle_type: o.vehicle_type ? String(o.vehicle_type).trim() : 'Unknown',
           payout: o.delivery_fee || o.total_amount || 0,
           distance: o.distance_text || 'Calculating...',
           pickup: o.vendor_shop_name || o.pickup_address || 'Pickup',

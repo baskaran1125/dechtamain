@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Phone, Check, ArrowLeft, User, Mail } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { sendOtp, verifyOtp as verifyOtpApi, updateProfile as updateProfileApi, googleAuth as googleAuthApi, completeGoogleProfile as completeGoogleProfileApi } from '../api/apiClient';
+import { CLIENT_TOKEN_KEY } from '../api/apiClient';
 
 /* ─── Google SVG Icon ─── */
 const GoogleIcon = () => (
@@ -114,7 +115,7 @@ export default function LoginModal({ open, onClose }) {
             const res = await googleAuthApi(response.credential);
 
             if (res.success && res.data?.token) {
-                localStorage.setItem('dechta_token', res.data.token);
+                localStorage.setItem(CLIENT_TOKEN_KEY, res.data.token);
                 tokenRef.current = res.data.token;
 
                 const user = res.data.user;
@@ -210,7 +211,7 @@ export default function LoginModal({ open, onClose }) {
         try {
             const res = await verifyOtpApi(phone, otpString, name);
             if (res.success && res.data?.token) {
-                localStorage.setItem('dechta_token', res.data.token);
+                localStorage.setItem(CLIENT_TOKEN_KEY, res.data.token);
                 tokenRef.current = res.data.token;
                 const userName = res.data.user?.name || '';
                 if (userName) {
@@ -250,7 +251,7 @@ export default function LoginModal({ open, onClose }) {
             const res = await completeGoogleProfileApi(googlePhone, name.trim());
             if (res.success && res.data?.token) {
                 // Replace with updated JWT containing phone
-                localStorage.setItem('dechta_token', res.data.token);
+                localStorage.setItem(CLIENT_TOKEN_KEY, res.data.token);
                 login(name.trim() || googleUserData?.name || googleUserData?.email, googlePhone);
                 resetAndClose();
             } else {

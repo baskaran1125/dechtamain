@@ -26,9 +26,17 @@ async function ensureDriverVehicleCompatibilitySchema() {
           await db.query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS dimensions VARCHAR(100);`);
           await db.query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS body_type VARCHAR(50);`);
         }
+
+        if (await tableExists('driver_profiles')) {
+          await db.query(`ALTER TABLE driver_profiles ADD COLUMN IF NOT EXISTS tshirt_size VARCHAR(20);`);
+        }
+
+        if (await tableExists('driver_bank_accounts')) {
+          await db.query(`ALTER TABLE driver_bank_accounts ADD COLUMN IF NOT EXISTS bank_branch VARCHAR(120);`);
+        }
       } catch (error) {
-        driverVehicleSchemaReadyPromise = null;
-        throw error;
+        // Schema patching is best-effort; runtime writes already guard for missing columns.
+        console.warn('[driverController] Schema compatibility patch warning:', error.message);
       }
     })();
   }
@@ -120,6 +128,82 @@ function splitDocUrl(value) {
   return [parts[0] || null, parts[1] || null];
 }
 
+const VEHICLE_MODEL_SPECS = {
+  '2w_standard': { name: 'Standard Bike', weight: 20, dimensions: '3 ft', bodyType: 'Open' },
+  '3w_500kg': { name: '500 kg', weight: 500, dimensions: '5.5 ft', bodyType: 'Open' },
+  '4w_750kg': { name: '750 kg', weight: 750, dimensions: '6 ft' },
+  '4w_1200kg': { name: '1200 kg', weight: 1200, dimensions: '7 ft' },
+  '4w_1700kg': { name: '1700 kg', weight: 1700, dimensions: '8 ft' },
+  '4w_2500kg': { name: '2500 kg', weight: 2500, dimensions: '10 ft' },
+};
+
+const VEHICLE_MODEL_ALIASES = {
+  '3w_standard': '3w_500kg',
+  '4w_14ton': '4w_1200kg',
+  '4w_17ton': '4w_1700kg',
+  '4w_25ton': '4w_2500kg',
+};
+
+function normalizeVehicleType(vehicleType) {
+  const raw = String(vehicleType || '').trim().toLowerCase();
+  const map = {
+    '2w': '2wheeler',
+    '2wheeler': '2wheeler',
+    '2-wheeler': '2wheeler',
+    '2 wheeler': '2wheeler',
+    bike: '2wheeler',
+    motorcycle: '2wheeler',
+    '3w': '3wheeler',
+    '3wheeler': '3wheeler',
+    '3-wheeler': '3wheeler',
+    '3 wheeler': '3wheeler',
+    auto: '3wheeler',
+    'auto rickshaw': '3wheeler',
+    '4w': '4wheeler',
+    '4wheeler': '4wheeler',
+    '4-wheeler': '4wheeler',
+    '4 wheeler': '4wheeler',
+    truck: '4wheeler',
+    van: '4wheeler',
+  };
+  return map[raw] || raw || null;
+}
+
+function toNumericOrNull(value) {
+  if (value == null || value === '') return null;
+  const parsed = Number(String(value).replace(/[^0-9.]/g, ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeVehicleRegistrationInput(input) {
+  const normalizedType = normalizeVehicleType(input.vehicleType);
+  const rawModelId = String(input.specificModelId || '').trim().toLowerCase();
+  const normalizedModelId = VEHICLE_MODEL_ALIASES[rawModelId] || rawModelId || null;
+
+  let fallbackModelId = normalizedModelId;
+  if (!fallbackModelId && normalizedType === '2wheeler') fallbackModelId = '2w_standard';
+  if (!fallbackModelId && normalizedType === '3wheeler') fallbackModelId = '3w_500kg';
+  if (!fallbackModelId && normalizedType === '4wheeler') fallbackModelId = '4w_750kg';
+
+  const spec = fallbackModelId ? VEHICLE_MODEL_SPECS[fallbackModelId] || null : null;
+
+  const parsedWeight = toNumericOrNull(input.vehicleWeight);
+  const normalizedWeight = parsedWeight != null ? parsedWeight : (spec?.weight ?? null);
+
+  const normalizedModelName = String(input.vehicleModelName || '').trim() || (spec?.name || null);
+  const normalizedDimensions = String(input.vehicleDimensions || '').trim() || (spec?.dimensions || null);
+  const normalizedBodyType = String(input.bodyType || '').trim() || (spec?.bodyType || null);
+
+  return {
+    vehicleType: normalizedType,
+    specificModelId: fallbackModelId,
+    vehicleModelName: normalizedModelName,
+    vehicleWeight: normalizedWeight,
+    vehicleDimensions: normalizedDimensions,
+    bodyType: normalizedBodyType,
+  };
+}
+
 // ──────────────────────────────────────────────────────────────
 // GET /api/driver/profile
 // FIX: single JOIN replaces 5 sequential queries; wrapped in try/catch
@@ -153,14 +237,18 @@ async function getProfile(request, reply) {
     let vehicle = null;
     if (hasLegacyVehicles) {
       vehicle = await safeOptionalSelectOne('driver_vehicles', { driver_id: driverId });
-    } else if (hasUnifiedVehicles) {
+    }
+    // Fallback to unified schema when legacy table exists but has no row for this driver.
+    if (!vehicle && hasUnifiedVehicles) {
       vehicle = await safeOptionalSelectOne('vehicles', { driver_id: driverId });
     }
 
     let bank = null;
     if (hasLegacyBank) {
       bank = await safeOptionalSelectOne('driver_bank_accounts', { driver_id: driverId });
-    } else if (hasUnifiedBank && profileUserId) {
+    }
+    // Fallback to unified schema when legacy table exists but has no row for this driver.
+    if (!bank && hasUnifiedBank && profileUserId) {
       bank = await safeOptionalSelectOne('bank_accounts', { user_id: profileUserId });
     }
 
@@ -213,7 +301,7 @@ async function getProfile(request, reply) {
           full_name:         profile.full_name,
           dob:               profile.date_of_birth,
           blood_group:       profile.blood_group,
-          tshirt_size:       null,
+          tshirt_size:       profile.tshirt_size || null,
           emergency_contact: profile.emergency_contact,
           preferred_zone:    profile.preferred_zone,
           avatar_url:        profile.avatar_url,
@@ -329,7 +417,7 @@ async function getProfile(request, reply) {
           full_name: request.driver?.full_name || null,
           dob: request.driver?.date_of_birth || null,
           blood_group: request.driver?.blood_group || null,
-          tshirt_size: null,
+          tshirt_size: request.driver?.tshirt_size || null,
           emergency_contact: request.driver?.emergency_contact || null,
           preferred_zone: request.driver?.preferred_zone || null,
           avatar_url: request.driver?.avatar_url || null,
@@ -421,9 +509,18 @@ async function completeRegistration(request, reply) {
     accountHolder, bankAccount, ifscCode, bankBranch, referralCode,
   } = request.body;
 
+  const normalizedVehicle = normalizeVehicleRegistrationInput({
+    vehicleType,
+    specificModelId,
+    vehicleModelName,
+    vehicleWeight,
+    vehicleDimensions,
+    bodyType,
+  });
+
   const missingFields = [];
   if (!fullName)        missingFields.push('fullName');
-  if (!vehicleType)     missingFields.push('vehicleType');
+  if (!normalizedVehicle.vehicleType) missingFields.push('vehicleType');
   if (!vehicleNumber)   missingFields.push('vehicleNumber');
   if (!bankAccount)     missingFields.push('bankAccount');
   if (!ifscCode)        missingFields.push('ifscCode');
@@ -446,18 +543,17 @@ async function completeRegistration(request, reply) {
     }
 
     // 1. Update driver profile
-    await db.update(
-      'driver_profiles',
-      {
-        full_name:         fullName,
-        date_of_birth:     finalDob,
-        emergency_contact: emergencyContact || null,
-        blood_group:       bloodGroup || null,
-        preferred_zone:    preferredZone || null,
-        is_registered:     true,
-      },
-      { id: driverId }
-    );
+    const profilePayload = await filterDataForTable('driver_profiles', {
+      full_name:         fullName,
+      date_of_birth:     finalDob,
+      emergency_contact: emergencyContact || null,
+      blood_group:       bloodGroup || null,
+      tshirt_size:       tshirtSize || null,
+      preferred_zone:    preferredZone || null,
+      is_registered:     true,
+    });
+
+    await db.update('driver_profiles', profilePayload, { id: driverId });
 
     await db.update(
       'users',
@@ -468,23 +564,28 @@ async function completeRegistration(request, reply) {
     // 2. Upsert vehicle
     const vehicleData = {
       driver_id:           driverId,
-      vehicle_type:        vehicleType,
-      model_id:            specificModelId   || null,
-      model_name:          vehicleModelName  || null,
-      weight_capacity:     vehicleWeight ? parseFloat(vehicleWeight) || null : null,
-      dimensions:          vehicleDimensions || null,
-      body_type:           bodyType          || null,
+      vehicle_type:        normalizedVehicle.vehicleType,
+      model_id:            normalizedVehicle.specificModelId,
+      model_name:          normalizedVehicle.vehicleModelName,
+      weight_capacity:     normalizedVehicle.vehicleWeight,
+      dimensions:          normalizedVehicle.vehicleDimensions,
+      body_type:           normalizedVehicle.bodyType,
       vehicle_number:      vehicleNumber.toUpperCase(),
       registration_number: vehicleNumber.toUpperCase(),
       is_active:           true,
     };
 
     if (await tableExists('driver_vehicles')) {
-      const existingVehicle = await db.selectOne('driver_vehicles', { driver_id: driverId });
+      const legacyVehicleData = await filterDataForTable('driver_vehicles', vehicleData);
+      const existingVehicle = await safeOptionalSelectOne('driver_vehicles', { driver_id: driverId });
       if (existingVehicle) {
-        await db.update('driver_vehicles', vehicleData, { driver_id: driverId });
+        if (Object.keys(legacyVehicleData).length > 0) {
+          await db.update('driver_vehicles', legacyVehicleData, { driver_id: driverId });
+        }
       } else {
-        await db.insert('driver_vehicles', vehicleData);
+        if (Object.keys(legacyVehicleData).length > 0) {
+          await db.insert('driver_vehicles', legacyVehicleData);
+        }
       }
     }
 
@@ -492,15 +593,15 @@ async function completeRegistration(request, reply) {
     if (await tableExists('vehicles')) {
       const unifiedVehicleData = await filterDataForTable('vehicles', {
         driver_id:            driverId,
-        vehicle_type:         vehicleType,
+        vehicle_type:         normalizedVehicle.vehicleType,
         vehicle_number:       vehicleNumber.toUpperCase(),
         license_plate:        vehicleNumber.toUpperCase(),
         registration_number:  vehicleNumber.toUpperCase(),
-        model_id:             specificModelId   || null,
-        model_name:           vehicleModelName  || null,
-        weight_capacity:      vehicleWeight ? parseFloat(vehicleWeight) || null : null,
-        dimensions:           vehicleDimensions || null,
-        body_type:            bodyType          || null,
+        model_id:             normalizedVehicle.specificModelId,
+        model_name:           normalizedVehicle.vehicleModelName,
+        weight_capacity:      normalizedVehicle.vehicleWeight,
+        dimensions:           normalizedVehicle.vehicleDimensions,
+        body_type:            normalizedVehicle.bodyType,
         status:               'active',
       });
       const existingUnifiedVehicle = await safeOptionalSelectOne('vehicles', { driver_id: driverId });
@@ -520,15 +621,21 @@ async function completeRegistration(request, reply) {
       account_holder_name: accountHolder,
       account_number:      bankAccount,
       ifsc_code:           ifscCode.toUpperCase(),
+      bank_branch:         bankBranch || null,
       is_verified:         false,
     };
 
     if (await tableExists('driver_bank_accounts')) {
-      const existingBank = await db.selectOne('driver_bank_accounts', { driver_id: driverId });
+      const legacyBankData = await filterDataForTable('driver_bank_accounts', bankData);
+      const existingBank = await safeOptionalSelectOne('driver_bank_accounts', { driver_id: driverId });
       if (existingBank) {
-        await db.update('driver_bank_accounts', bankData, { driver_id: driverId });
+        if (Object.keys(legacyBankData).length > 0) {
+          await db.update('driver_bank_accounts', legacyBankData, { driver_id: driverId });
+        }
       } else {
-        await db.insert('driver_bank_accounts', bankData);
+        if (Object.keys(legacyBankData).length > 0) {
+          await db.insert('driver_bank_accounts', legacyBankData);
+        }
       }
     }
 
@@ -788,39 +895,64 @@ async function uploadDocument(request, reply) {
     }
 
     const finalPath = uploadedPaths.join(',');
+    if (!uploadedPaths.length) {
+      return reply.code(400).send({ success: false, message: 'No file uploaded' });
+    }
 
     const hasLegacyDocs = await tableExists('driver_documentss');
     const hasUnifiedDocs = await tableExists('user_documents');
+    let wroteDocument = false;
 
     if (hasLegacyDocs) {
-      const existingDoc = await db.selectOne('driver_documentss', { driver_id: driverId });
-      if (existingDoc) {
-        await db.update('driver_documentss', { [fieldMap[docType]]: finalPath, verification_status: 'pending' }, { driver_id: driverId });
-      } else {
-        await db.insert('driver_documentss', { driver_id: driverId, [fieldMap[docType]]: finalPath, verification_status: 'pending' });
+      try {
+        const legacyDocPayload = await filterDataForTable('driver_documentss', {
+          driver_id: driverId,
+          [fieldMap[docType]]: finalPath,
+          verification_status: 'pending',
+        });
+        const existingDoc = await safeOptionalSelectOne('driver_documentss', { driver_id: driverId });
+        if (existingDoc) {
+          const { driver_id: _omit, ...legacyUpdate } = legacyDocPayload;
+          if (Object.keys(legacyUpdate).length > 0) {
+            await db.update('driver_documentss', legacyUpdate, { driver_id: driverId });
+            wroteDocument = true;
+          }
+        } else if (Object.keys(legacyDocPayload).length > 0) {
+          await db.insert('driver_documentss', legacyDocPayload);
+          wroteDocument = true;
+        }
+      } catch (legacyDocErr) {
+        request.log.warn({ err: legacyDocErr }, 'Legacy document write failed; trying unified fallback');
       }
-    } else if (hasUnifiedDocs) {
+    }
+
+    if (!wroteDocument && hasUnifiedDocs) {
       const userId = request.driver.user_id;
+      if (!userId) {
+        return reply.code(400).send({ success: false, message: 'Driver user mapping missing.' });
+      }
       const existing = await db.selectOne('user_documents', { user_id: userId, document_type: docType });
-      const docPayload = {
+      const docPayload = await filterDataForTable('user_documents', {
         user_id: userId,
         document_type: docType,
         document_url: uploadedUrls.join(','),
         front_url: uploadedUrls[0] || null,
         back_url: uploadedUrls[1] || null,
         status: 'pending',
-      };
+      });
       if (existing) {
-        await db.update('user_documents', {
-          document_url: docPayload.document_url,
-          front_url: docPayload.front_url,
-          back_url: docPayload.back_url,
-          status: docPayload.status,
-        }, { id: existing.id });
-      } else {
+        const { user_id: _u, document_type: _d, ...updatePayload } = docPayload;
+        if (Object.keys(updatePayload).length > 0) {
+          await db.update('user_documents', updatePayload, { id: existing.id });
+          wroteDocument = true;
+        }
+      } else if (Object.keys(docPayload).length > 0) {
         await db.insert('user_documents', docPayload);
+        wroteDocument = true;
       }
-    } else {
+    }
+
+    if (!wroteDocument) {
       return reply.code(500).send({ success: false, message: 'No document table found. Please apply unified_schema.sql migration.' });
     }
 
@@ -992,11 +1124,13 @@ async function updateBankAccount(request, reply) {
   const driverUserId = request.driver.user_id || null;
   const { accountHolder, accountNumber, ifscCode, bankBranch, upiId } = request.body;
 
+  await ensureDriverVehicleCompatibilitySchema();
+
   const updates = {};
   if (accountHolder)       updates.account_holder_name = accountHolder;
   if (accountNumber)       updates.account_number      = accountNumber;
   if (ifscCode)            updates.ifsc_code           = ifscCode.toUpperCase();
-  // if (bankBranch)          updates.bank_branch         = bankBranch; // Column missing in DB
+  if (bankBranch)         updates.bank_branch         = bankBranch;
   // if (upiId !== undefined) updates.upi_id              = upiId; // Column missing in DB
 
   if (Object.keys(updates).length === 0) {
@@ -1086,6 +1220,7 @@ async function updateVehicle(request, reply) {
     if (await tableExists('driver_vehicles')) {
       const legacyPayload = removeUndefinedFields({
         registration_number: registrationNumber || undefined,
+        vehicle_number:      registrationNumber || undefined,
         vehicle_type:        vehicleType || undefined,
         model_id:            specificModelId || undefined,
         model_name:          vehicleModelName || undefined,

@@ -32,7 +32,7 @@ export default function WelcomePage({ onRoleSelect }) {
       subtitle: 'Manpower & on-site task management',
       color: 'from-orange-500 to-orange-600',
       borderColor: 'border-orange-300',
-      port: 5174,
+      port: 5176,
       appName: 'worker-app',
     },
   ];

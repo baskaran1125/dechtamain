@@ -45,8 +45,13 @@ const WalletPage = ({ settlements, setSettlements, notify }) => {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      setStats(data);
-    } catch {
+      if (data.success || data.totalRevenue !== undefined) {
+        setStats(data);
+      } else {
+        setStats(null);
+      }
+    } catch (err) {
+      console.error('Fetch stats error:', err);
       setStats(null);
     } finally {
       setLoading(false);

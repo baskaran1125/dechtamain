@@ -5,6 +5,9 @@ import InvoiceComponent from '../components/modals/InvoiceComponent';
 import { OfflineBillModal } from '../components/modals/OfflineBillModal';
 
 const normalizeOrderStatus = (order) => {
+  const vendorStatus = String(order?.v_status || '').trim().toLowerCase();
+  if (vendorStatus === 'accept') return 'assigned';
+
   const raw = String(order?.normalized_status || order?.normalizedStatus || order?.status || '').trim().toLowerCase();
   if (!raw) return 'pending';
   if (['pending', 'placed'].includes(raw)) return 'pending';
@@ -19,6 +22,13 @@ const normalizeOrderStatus = (order) => {
 const BillingPage = ({ orders = [], invoices = [], products, vendor, onGenerateOfflineBill }) => {
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [showOffline, setShowOffline]         = useState(false);
+  
+  // Helper function to safely get invoice amount with proper formatting
+  const getAmount = (item) => {
+    const amount = item?.total_amount || item?.totalAmount || item?.price || item?.order_amount || 0;
+    return Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  };
+  
   const billable = [
     ...orders.filter(o => normalizeOrderStatus(o) !== 'pending'), 
     ...invoices
@@ -51,7 +61,7 @@ const BillingPage = ({ orders = [], invoices = [], products, vendor, onGenerateO
                   <td className="px-6 py-4">{o.date || new Date(o.created_at).toLocaleDateString()}</td>
                   <td className="px-6 py-4"><span className={`text-[9px] font-bold px-2 py-1 rounded uppercase ${(o.type==='Offline' || false)?'bg-purple-100 text-purple-700':'bg-blue-100 text-blue-700'}`}>{o.type || (o.invoice_number ? 'Offline' : 'Online')}</span></td>
                   <td className="px-6 py-4 font-medium">{o.customerName || o.customer_name || 'Standard Customer'}</td>
-                  <td className="px-6 py-4 text-right font-bold text-[#0ceded]">₹ {Number(o.totalAmount || o.total_amount).toLocaleString()}</td>
+                  <td className="px-6 py-4 text-right font-bold text-[#0ceded]">{getAmount(o)}</td>
                   <td className="px-6 py-4 text-center">
                     <button onClick={() => setSelectedInvoice(o)} className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-gray-50 transition">View Invoice</button>
                   </td>

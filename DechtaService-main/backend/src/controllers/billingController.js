@@ -179,12 +179,11 @@ async function createInvoice(request, reply) {
   try {
     const result = await db.query(
       `INSERT INTO invoices
-         (id, vendor_id, order_id, invoice_number, items, subtotal, tax_amount,
+         (vendor_id, order_id, invoice_number, items, subtotal, tax_amount,
           total_amount, tax_rate, customer_name, customer_phone, customer_gst, customer_address, status, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Generated',NOW())
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'Generated',NOW())
        RETURNING *`,
       [
-        uuidv4(),
         request.vendor.id,
         orderId || null,
         invoiceNumber,

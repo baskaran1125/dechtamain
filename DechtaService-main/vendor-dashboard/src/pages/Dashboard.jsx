@@ -23,6 +23,9 @@ const PERIOD_LABELS = {
 };
 
 const normalizeOrderStatus = (order) => {
+  const vendorStatus = String(order?.v_status || '').trim().toLowerCase();
+  if (vendorStatus === 'accept') return 'assigned';
+
   const raw = String(order?.normalized_status || order?.normalizedStatus || order?.status || '').trim().toLowerCase();
   if (!raw) return 'pending';
   if (['pending', 'placed'].includes(raw)) return 'pending';
@@ -39,6 +42,17 @@ const toUiStatus = (normalizedStatus) => {
   if (['in_transit', 'assigned', 'confirmed'].includes(normalizedStatus)) return 'Live';
   if (normalizedStatus === 'cancelled') return 'Cancelled';
   return 'Pending';
+};
+
+// ── get product name from order ─────────────────────────────────
+const getProductName = (order) => {
+  return order.productName || order.product_name || order.name || 'Order Item' || '—';
+};
+
+// ── get order amount ────────────────────────────────────────────
+const getOrderAmount = (order) => {
+  const amount = order.totalAmount || order.total_amount || order.final_amount || order.price || 0;
+  return Number(amount);
 };
 
 // ── status badge ─────────────────────────────────────────────
@@ -292,10 +306,10 @@ const Dashboard = ({ products, orders, setView }) => {
                       #{String(o.id).slice(-8)}
                     </td>
                     <td className="px-5 py-3 text-white">
-                      {o.productName || o.product_name || '—'}
+                      {getProductName(o)}
                     </td>
                     <td className="px-5 py-3 text-right font-bold text-white">
-                      ₹ {Number(o.totalAmount || o.total_amount || 0).toLocaleString('en-IN')}
+                      ₹ {getOrderAmount(o).toLocaleString('en-IN')}
                     </td>
                     <td className="px-5 py-3 text-center">
                       <StatusBadge status={toUiStatus(normalizeOrderStatus(o))} />

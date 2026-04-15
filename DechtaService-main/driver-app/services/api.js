@@ -104,6 +104,12 @@ async function apiRequest(endpoint, options = {}) {
     const data = await response.json();
 
     if (!response.ok) {
+      if (response.status === 401) {
+        // Clear stale auth locally so app can route back to login cleanly.
+        try { await TokenStore.remove(); } catch (_) {}
+        try { await DriverStore.remove(); } catch (_) {}
+        throw new Error('Session expired. Please login again.');
+      }
       const errorMsg = data?.message || `HTTP ${response.status}`;
       throw new Error(errorMsg);
     }

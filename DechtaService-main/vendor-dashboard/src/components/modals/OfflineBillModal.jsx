@@ -117,10 +117,10 @@ export const OfflineBillModal = ({ products, onClose, onGenerate }) => {
                   <tr key={i} className="border-b border-gray-100 dark:border-slate-700 last:border-0 hover:bg-white dark:hover:bg-slate-800">
                     <td className="p-3">
                       <div className="font-bold dark:text-white">{item.productName}</div>
-                      <div className="text-xs text-gray-500">Qty: {item.quantity} × ₹{item.price}</div>
+                      <div className="text-xs text-gray-500">Qty: {Number(item.quantity)} × ₹{Number(item.price).toFixed(2)}</div>
                     </td>
                     <td className="p-3 text-right">
-                      <div className="font-bold dark:text-white">₹{item.total}</div>
+                      <div className="font-bold dark:text-white">₹{Number(item.total).toFixed(2)}</div>
                       <button onClick={() => setCart(c=>c.filter((_,j)=>j!==i))} className="text-[10px] text-red-500 hover:underline mt-1">Remove</button>
                     </td>
                   </tr>
@@ -144,7 +144,7 @@ export const OfflineBillModal = ({ products, onClose, onGenerate }) => {
         <div className="flex justify-between items-center border-t border-gray-100 dark:border-slate-800 pt-6">
           <div>
             <span className="text-xs text-gray-500 uppercase font-bold">Total Payable</span>
-            <div className="text-3xl font-black text-gray-900 dark:text-white">₹ {total}</div>
+            <div className="text-3xl font-black text-gray-900 dark:text-white">₹ {Number(total).toFixed(2)}</div>
           </div>
           <button onClick={handleGenerate}
             className="bg-green-600 hover:bg-green-500 text-white font-bold px-8 py-3 rounded-xl shadow-lg shadow-green-500/30 transition">

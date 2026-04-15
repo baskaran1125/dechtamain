@@ -1,5 +1,11 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { getProfile, fetchAddresses as apiFetchAddresses, saveAddress as apiSaveAddress, deleteAddress as apiDeleteAddress } from '../api/apiClient';
+import {
+    CLIENT_TOKEN_KEY,
+    getProfile,
+    fetchAddresses as apiFetchAddresses,
+    saveAddress as apiSaveAddress,
+    deleteAddress as apiDeleteAddress
+} from '../api/apiClient';
 
 const AuthContext = createContext();
 
@@ -16,7 +22,7 @@ export function AuthProvider({ children }) {
 
     // ── Restore session on mount (same approach as vendor app) ──
     useEffect(() => {
-        const token = localStorage.getItem('dechta_token');
+        const token = localStorage.getItem(CLIENT_TOKEN_KEY);
         if (!token) {
             setAuthLoading(false);
             return;
@@ -61,7 +67,7 @@ export function AuthProvider({ children }) {
                         }
                     } catch { /* non-fatal */ }
                 } else {
-                    localStorage.removeItem('dechta_token');
+                    localStorage.removeItem(CLIENT_TOKEN_KEY);
                 }
             })
             .catch(() => {
@@ -76,7 +82,7 @@ export function AuthProvider({ children }) {
                     setUserData(prev => ({ ...prev, name, phone, initials }));
                     setIsLoggedIn(true);
                 } catch {
-                    localStorage.removeItem('dechta_token');
+                    localStorage.removeItem(CLIENT_TOKEN_KEY);
                 }
             })
             .finally(() => {
@@ -103,7 +109,7 @@ export function AuthProvider({ children }) {
     }, []);
 
     const logout = useCallback(() => {
-        localStorage.removeItem('dechta_token');
+        localStorage.removeItem(CLIENT_TOKEN_KEY);
         setIsLoggedIn(false);
         setUserData({
             name: '', phone: '', email: '', initials: '', avatar: null,
@@ -125,7 +131,7 @@ export function AuthProvider({ children }) {
     const addAddress = useCallback(async (address) => {
         try {
             // Persist to backend if user is logged in
-            const token = localStorage.getItem('dechta_token');
+            const token = localStorage.getItem(CLIENT_TOKEN_KEY);
             if (token) {
                 const res = await apiSaveAddress({
                     tag: (address.tag || 'other').toLowerCase(),

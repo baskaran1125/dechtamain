@@ -40,7 +40,7 @@ const DEFAULT_VEHICLES = [
         tier: 2,
         base_fare: 149,
         options: [
-            { id: '3w_standard', name: 'Standard Auto', fee: 149, desc: '~45 mins' }
+            { id: '3w_500kg', name: '3 Wheeler - 500 kg', fee: 149, desc: 'Up to 500kg' }
         ]
     },
     {
@@ -53,9 +53,9 @@ const DEFAULT_VEHICLES = [
         base_fare: 399,
         options: [
             { id: '4w_750kg', name: '4 Wheeler - 750 kg', fee: 399, desc: 'Small Items' },
-            { id: '4w_14ton', name: '4 Wheeler - 1.4 Ton', fee: 499, desc: 'Medium Cargo' },
-            { id: '4w_17ton', name: '4 Wheeler - 1.7 Ton', fee: 599, desc: 'Large Cargo' },
-            { id: '4w_25ton', name: '4 Wheeler - 2.5 Ton', fee: 799, desc: 'Extra Large' }
+            { id: '4w_1200kg', name: '4 Wheeler - 1200 kg', fee: 499, desc: 'Medium Cargo' },
+            { id: '4w_1700kg', name: '4 Wheeler - 1700 kg', fee: 599, desc: 'Large Cargo' },
+            { id: '4w_2500kg', name: '4 Wheeler - 2500 kg', fee: 799, desc: 'Extra Large' }
         ]
     }
 ];

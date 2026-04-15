@@ -1,6 +1,5 @@
 // src/controllers/ordersController.js
 const db = require('../config/database');
-const { generateDeliveryOtp } = require('../services/otpService');
 const { uploadFile } = require('../services/uploadService');
 const { notifyOrderUpdate, broadcastNewOrderToOnlineDrivers } = require('../services/socketService');
 const { calculateDeliveryCharge, toFiniteNumber } = require('../services/pricingService');
@@ -58,6 +57,39 @@ async function filterDataForTable(tableName, data) {
   );
 }
 
+function normalizeVehicleType(vehicleType) {
+  if (!vehicleType) return null;
+  
+  const normalized = String(vehicleType).trim().toLowerCase();
+  
+  const typeMap = {
+    '2w': '2wheeler',
+    '2wheeler': '2wheeler',
+    '2-wheeler': '2wheeler',
+    '2 wheeler': '2wheeler',
+    'bike': '2wheeler',
+    'motorcycle': '2wheeler',
+    
+    '3w': '3wheeler',
+    '3wheeler': '3wheeler',
+    '3-wheeler': '3wheeler',
+    '3 wheeler': '3wheeler',
+    'auto': '3wheeler',
+    'tuk tuk': '3wheeler',
+    'auto rickshaw': '3wheeler',
+    
+    '4w': '4wheeler',
+    '4wheeler': '4wheeler',
+    '4-wheeler': '4wheeler',
+    '4 wheeler': '4wheeler',
+    'truck': '4wheeler',
+    'van': '4wheeler',
+    'mini truck': '4wheeler',
+  };
+  
+  return typeMap[normalized] || null;
+}
+
 function toNumberOrNull(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -112,33 +144,53 @@ async function getAvailableOrders(request, reply) {
       return reply.send({ success: true, data: [], isOnline: true });
     }
 
-    const driverVehicleType = String(vehicle.vehicle_type || '').trim();
+    // Normalize vehicle type to standard format
+    const driverVehicleType = normalizeVehicleType(vehicle.vehicle_type);
     const driverModelId = String(vehicle.model_id || '').trim();
     const driverBodyType = String(vehicle.body_type || '').trim();
     const parsedWeightCapacity = toNumberOrNull(vehicle.weight_capacity);
     const driverWeightCapacity = parsedWeightCapacity != null ? parsedWeightCapacity : 999999;
+
+    // Validation: Ensure driver has a valid vehicle type
+    if (!driverVehicleType) {
+      request.log.warn({ driverId, rawVehicleType: vehicle.vehicle_type }, 'Driver has no valid vehicle_type registered. Cannot fetch orders.');
+      return reply.send({ success: true, data: [], isOnline: true });
+    }
+
+    const orderColumns = await getTableColumns('orders');
+    const hasVendorStatusColumn = orderColumns.has('v_status');
 
     const result = await db.query(
       `SELECT o.*
        FROM orders o
        WHERE LOWER(COALESCE(o.status::text, '')) = 'pending'
          AND o.driver_id IS NULL
-         AND (o.vehicle_type IS NULL OR o.vehicle_type = '' OR LOWER(o.vehicle_type) = LOWER($1))
-         AND (o.model_id_requested IS NULL OR o.model_id_requested = '' OR $2 = '' OR LOWER(o.model_id_requested) = LOWER($2))
-         AND (o.weight_capacity_requested IS NULL OR o.weight_capacity_requested <= $3)
+         ${hasVendorStatusColumn ? "AND LOWER(COALESCE(o.v_status::text, 'pending')) = 'accept'" : ''}
          AND (
-           o.body_type_requested IS NULL OR o.body_type_requested = '' OR $4 = '' OR
-           LOWER(o.body_type_requested) = LOWER($4) OR
-           LOWER(o.body_type_requested) LIKE '%' || LOWER($4) || '%' OR
-           LOWER($4) LIKE '%' || LOWER(o.body_type_requested) || '%'
+           o.vehicle_type IS NULL OR o.vehicle_type = '' OR 
+           LOWER(TRIM(o.vehicle_type)) = $1 OR
+           LOWER(TRIM(o.vehicle_type)) = $2 OR
+           LOWER(TRIM(o.vehicle_type)) = $3 OR
+           LOWER(TRIM(o.vehicle_type)) = $4
+         )
+         AND (o.model_id_requested IS NULL OR o.model_id_requested = '' OR $5 = '' OR LOWER(o.model_id_requested) = LOWER($5))
+         AND (o.weight_capacity_requested IS NULL OR o.weight_capacity_requested <= $6)
+         AND (
+           o.body_type_requested IS NULL OR o.body_type_requested = '' OR $7 = '' OR
+           LOWER(o.body_type_requested) = LOWER($7) OR
+           LOWER(o.body_type_requested) LIKE '%' || LOWER($7) || '%' OR
+           LOWER($7) LIKE '%' || LOWER(o.body_type_requested) || '%'
          )
        ORDER BY o.created_at DESC
        LIMIT 20`,
       [
-        driverVehicleType,
-        driverModelId,
-        driverWeightCapacity,
-        driverBodyType,
+        driverVehicleType,           // $1 normalized (e.g., '3wheeler')
+        driverVehicleType.slice(0, 1) + 'w', // $2 shorthand (e.g., '3w')
+        driverVehicleType + 's',     // $3 plural variant (e.g., '3wheelers')
+        driverVehicleType.replace('wheeler', '-wheeler'), // $4 hyphenated (e.g., '3-wheeler')
+        driverModelId,               // $5
+        driverWeightCapacity,        // $6
+        driverBodyType,              // $7
       ]
     );
 
@@ -146,6 +198,15 @@ async function getAvailableOrders(request, reply) {
       ...o,
       normalized_status: normalizeOrderStatus(o.status),
     }));
+
+    // Log matching details for debugging
+    request.log.debug({
+      driverId,
+      driverVehicleType,
+      driverModelId,
+      driverBodyType,
+      matchedOrdersCount: mapped.length,
+    }, 'Orders fetched and matched');
 
     return reply.send({ success: true, data: mapped, isOnline: true });
   } catch (error) {
@@ -245,10 +306,29 @@ async function acceptOrder(request, reply) {
     });
   }
 
+  // Check if order already has an active trip with another driver
+  const existingTrip = await db.query(
+    `SELECT dt.id, dt.driver_id, dt.status 
+     FROM delivery_trips dt
+     WHERE dt.order_id = $1
+       AND LOWER(COALESCE(dt.status::text, '')) NOT IN ('delivered', 'cancelled', 'missed')
+     LIMIT 1`,
+    [orderId]
+  );
+
+  if (existingTrip.rows.length > 0) {
+    return reply.code(409).send({
+      success: false,
+      message: 'This order is already being handled by another driver.',
+    });
+  }
+
   const client = await db.beginTransaction();
   try {
     const profile = await db.selectOne('driver_profiles', { id: driverId });
-    const deliveryOtp = await generateDeliveryOtp(orderId);
+
+    // Generate OTP inline (don't use db.update which uses pool, not transaction)
+    const deliveryOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
     // ATOMIC: only succeeds if order is still Pending with no driver assigned
     const claimed = await client.query(
@@ -256,7 +336,7 @@ async function acceptOrder(request, reply) {
        SET driver_id     = $1,
            driver_name   = $2,
            driver_number = $3,
-           status        = 'Assigned',
+           status        = 'processing',
            delivery_otp  = $4
        WHERE id = $5
          AND LOWER(COALESCE(status::text, '')) = 'pending'
@@ -282,6 +362,8 @@ async function acceptOrder(request, reply) {
     const trip = await client.query(
       `INSERT INTO delivery_trips (order_id, driver_id, status, payout_amount, started_at)
        VALUES ($1, $2, 'accepted', $3, NOW())
+       ON CONFLICT (order_id, driver_id) DO UPDATE
+       SET status = 'accepted', updated_at = NOW()
        RETURNING *`,
       [orderId, driverId, order.delivery_fee || order.total_amount || 0]
     );
@@ -407,15 +489,14 @@ async function confirmPickup(request, reply) {
       'delivery_trips',
       {
         status:      'picked_up',
-        picked_up_at: new Date().toISOString(),
-        ...(photoPath ? { pickup_photo_url: photoPath } : {}),
+        departed_pickup_at: new Date().toISOString(),
       },
       { id: tripId, driver_id: driverId }
     );
 
     const trip = await db.selectOne('delivery_trips', { id: tripId });
     if (trip?.order_id) {
-      await db.update('orders', { status: 'Out for Delivery' }, { id: trip.order_id });
+      await db.update('orders', { status: 'shipped' }, { id: trip.order_id });
     }
 
     notifyOrderUpdate(driverId, tripId, 'picked_up');
@@ -435,7 +516,7 @@ async function arrivedAtDropoff(request, reply) {
 
   try {
     const result = await db.query(
-      `SELECT dt.*, o.customer_phone, o.delivery_otp
+      `SELECT dt.*, o.customer_phone, o.delivery_otp as order_delivery_otp
        FROM delivery_trips dt
        LEFT JOIN orders o ON dt.order_id = o.id
        WHERE dt.id = $1 AND dt.driver_id = $2`,
@@ -453,10 +534,13 @@ async function arrivedAtDropoff(request, reply) {
       { id: tripId, driver_id: driverId }
     );
 
+    // Get OTP from either delivery_trips or orders table
+    const otp = trip.delivery_otp || trip.order_delivery_otp;
+    
     return reply.send({
       success: true,
       message: 'OTP sent to customer. Ask customer for the 4-digit PIN.',
-      ...(process.env.OTP_PROVIDER === 'mock' && { otp_for_testing: trip.delivery_otp }),
+      ...(process.env.OTP_PROVIDER === 'mock' && { otp_for_testing: otp }),
     });
   } catch (error) {
     request.log.error(error);
@@ -475,13 +559,15 @@ async function completeDelivery(request, reply) {
   const { tripId } = request.params;
   const { otp } = request.body;
 
+  request.log.info(`🔄 completeDelivery START - Trip: ${tripId}, Driver: ${driverId}`);
+
   if (!otp || otp.length !== 4) {
     return reply.code(400).send({ success: false, message: '4-digit OTP required' });
   }
 
   try {
     const tripResult = await db.query(
-      `SELECT dt.*, o.id as order_id, o.delivery_otp, o.delivery_fee, o.customer_name
+      `SELECT dt.*, o.id as order_id, o.delivery_otp as order_delivery_otp, o.delivery_fee, o.customer_name
        FROM delivery_trips dt
        LEFT JOIN orders o ON dt.order_id = o.id
        WHERE dt.id = $1 AND dt.driver_id = $2`,
@@ -501,7 +587,9 @@ async function completeDelivery(request, reply) {
       });
     }
 
-    if (String(trip.delivery_otp).trim() !== String(otp).trim()) {
+    // Check OTP from delivery_trips table first, fallback to orders table
+    const storedOtp = trip.delivery_otp || trip.order_delivery_otp;
+    if (!storedOtp || String(storedOtp).trim() !== String(otp).trim()) {
       return reply.code(400).send({ success: false, message: 'Incorrect OTP. Please try again.' });
     }
 
@@ -516,36 +604,67 @@ async function completeDelivery(request, reply) {
       { id: tripId }
     );
 
+    // ✅ CRITICAL: Update orders table so vendor sees order as 'delivered'
+    try {
+      const updateResult = await db.update(
+        'orders',
+        {
+          status: 'delivered',
+        },
+        { id: trip.order_id }
+      );
+      request.log.info(`✅ Order #${trip.order_id} status updated to "delivered"`);
+    } catch (orderErr) {
+      request.log.warn({ err: orderErr }, `❌ Order #${trip.order_id} status update failed (non-critical)`);
+    }
+
     const payoutAmount = trip.payout_amount || trip.delivery_fee || 0;
 
     if ((await tableExists('driver_wallets')) && (await tableExists('driver_transactions'))) {
       try {
-        const walletUpsert = await db.query(
-          `INSERT INTO driver_wallets (driver_id, balance, today_earnings, total_trips, last_updated)
-           VALUES ($1, $2, $2, 1, NOW())
-           ON CONFLICT (driver_id)
-           DO UPDATE SET
-             balance = driver_wallets.balance + EXCLUDED.balance,
-             today_earnings = driver_wallets.today_earnings + EXCLUDED.today_earnings,
-             total_trips = driver_wallets.total_trips + 1,
-             last_updated = NOW()
-           RETURNING id, balance`,
-          [driverId, payoutAmount]
+        // Check if wallet exists
+        const existingWallet = await db.query(
+          `SELECT id, balance FROM driver_wallets WHERE driver_id = $1 LIMIT 1`,
+          [driverId]
         );
 
-        const wallet = walletUpsert.rows[0];
-        if (wallet?.id) {
+        let walletId;
+        if (existingWallet.rows.length > 0) {
+          // Update existing wallet
+          const walletId_val = existingWallet.rows[0].id;
           await db.query(
-            `INSERT INTO driver_transactions (wallet_id, trip_id, type, amount, description, balance_after)
-             VALUES ($1, $2, 'credit', $3, $4, $5)`,
-            [
-              wallet.id,
-              tripId,
-              payoutAmount,
-              `Trip payout for order #${trip.order_id}`,
-              wallet.balance,
-            ]
+            `UPDATE driver_wallets 
+             SET balance = balance + $1,
+                 total_earned = total_earned + $1,
+                 today_earnings = today_earnings + $1,
+                 total_trips = total_trips + 1,
+                 last_updated = NOW()
+             WHERE id = $2`,
+            [payoutAmount, walletId_val]
           );
+          walletId = walletId_val;
+        } else {
+          // Create new wallet
+          const newWallet = await db.query(
+            `INSERT INTO driver_wallets (driver_id, balance, total_earned, today_earnings, total_trips, last_updated)
+             VALUES ($1, $2, $3, $4, 1, NOW())
+             RETURNING id`,
+            [driverId, payoutAmount, payoutAmount, payoutAmount]
+          );
+          walletId = newWallet.rows[0]?.id;
+        }
+
+        // Add transaction record if wallet exists
+        if (walletId) {
+          try {
+            await db.query(
+              `INSERT INTO driver_transactions (driver_id, transaction_type, amount, description, status)
+               VALUES ($1, 'credit', $2, $3, 'completed')`,
+              [driverId, payoutAmount, `Trip payout for order #${trip.order_id}`]
+            );
+          } catch (txErr) {
+            request.log.warn({ err: txErr }, 'Transaction record failed (non-critical)');
+          }
         }
       } catch (walletErr) {
         request.log.warn({ err: walletErr }, 'Delivery completed but wallet sync failed');
@@ -554,6 +673,8 @@ async function completeDelivery(request, reply) {
 
     notifyOrderUpdate(driverId, tripId, 'delivered', { payout: payoutAmount });
 
+    request.log.info(`✅ completeDelivery SUCCESS - Order #${trip.order_id}, Payout: ${payoutAmount}`);
+    
     return reply.send({
       success: true,
       message: 'Delivery completed successfully!',
@@ -561,7 +682,7 @@ async function completeDelivery(request, reply) {
       tripId,
     });
   } catch (err) {
-    request.log.error(err);
+    request.log.error(`❌ completeDelivery ERROR: ${err.message}`);
     return reply.code(500).send({ success: false, message: 'Failed to complete delivery' });
   }
 }
@@ -795,6 +916,7 @@ async function createOrder(request, reply) {
       delivery_latitude:         resolvedDeliveryLatitude,
       delivery_longitude:        resolvedDeliveryLongitude,
       status:                    'Pending',
+      v_status:                  'pending',
       delivery_fee:              resolvedDeliveryFee,
       delivery_distance_km:      resolvedDistanceKm,
       delivery_pricing_json:     resolvedDeliveryPricing ? JSON.stringify(resolvedDeliveryPricing) : null,
