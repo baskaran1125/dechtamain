@@ -283,6 +283,21 @@ function toFiniteNumber(value) {
   return Number.isFinite(num) ? num : null;
 }
 
+function getOrderAmountSql(columns) {
+  const availableColumns = [
+    'total_amount',
+    'final_total',
+    'final_amount',
+    'order_amount',
+  ].filter((column) => columns.has(column));
+
+  if (availableColumns.length === 0) {
+    return '0';
+  }
+
+  return `COALESCE(${availableColumns.join(', ')}, 0)`;
+}
+
 function firstNonEmpty(...values) {
   for (const value of values) {
     if (Array.isArray(value)) {
@@ -888,9 +903,12 @@ async function getVendorDashboard(request, reply) {
   const since = periodMap[period] || periodMap['1month'];
 
   try {
+    const orderColumns = await getTableColumns('orders').catch(() => new Set());
+    const amountSql = getOrderAmountSql(orderColumns);
+
     const [ordersRes, inventoryRes, bestRes, recentRes] = await Promise.all([
       db.query(
-        `SELECT COUNT(*) as total, COALESCE(SUM(total_amount),0) as revenue
+        `SELECT COUNT(*) as total, COALESCE(SUM(${amountSql}),0) as revenue
          FROM orders WHERE vendor_id = $1 AND created_at >= ${since}`,
         [vendorId]
       ),
@@ -977,29 +995,16 @@ async function getVendorWalletStats(request, reply) {
   const since = periodMap[period] || periodMap['1month'];
 
   try {
-    let revenueRes;
-    try {
-      revenueRes = await db.query(
-        `SELECT COALESCE(SUM(total_amount), 0) as total FROM orders
-         WHERE vendor_id = $1
-           AND created_at >= ${since}
-           AND LOWER(COALESCE(status::text, '')) IN ('completed', 'delivered')`,
-        [vendorId]
-      );
-    } catch (amountErr) {
-      if (!String(amountErr?.message || '').toLowerCase().includes('total_amount')) {
-        throw amountErr;
-      }
+    const orderColumns = await getTableColumns('orders').catch(() => new Set());
+    const amountSql = getOrderAmountSql(orderColumns);
 
-      // Legacy/unified fallback where total_amount may not exist.
-      revenueRes = await db.query(
-        `SELECT COALESCE(SUM(final_amount), 0) as total FROM orders
-         WHERE vendor_id = $1
-           AND created_at >= ${since}
-           AND LOWER(COALESCE(status::text, '')) IN ('completed', 'delivered')`,
-        [vendorId]
-      );
-    }
+    const revenueRes = await db.query(
+      `SELECT COALESCE(SUM(${amountSql}), 0) as total FROM orders
+       WHERE vendor_id = $1
+         AND created_at >= ${since}
+         AND LOWER(COALESCE(status::text, '')) IN ('completed', 'delivered')`,
+      [vendorId]
+    );
 
     const totalRevenue = parseFloat(revenueRes.rows[0]?.total || 0);
     const commissionRate = 0.05; // Platform fee
@@ -1066,14 +1071,15 @@ async function getVendorOrders(request, reply) {
 // ──────────────────────────────────────────────────────────────
 async function updateVendorOrderStatus(request, reply) {
   const { orderId } = request.params;
-  const { status } = request.body;
-  if (!status) {
-    return reply.code(400).send({ success: false, message: 'status required' });
+  const { status, v_status: vendorStatusInput } = request.body || {};
+  if (!status && !vendorStatusInput) {
+    return reply.code(400).send({ success: false, message: 'status or v_status required' });
   }
 
-  const statusKey = String(status).trim().toLowerCase();
-  const resolvedStatus = mapVendorStatusInput(status);
-  const isVendorAcceptAction = ['accept', 'accepted'].includes(statusKey);
+  const statusKey = String(status || '').trim().toLowerCase();
+  const vendorStatusKey = String(vendorStatusInput || '').trim().toLowerCase();
+  const resolvedStatus = status ? mapVendorStatusInput(status) : undefined;
+  const isVendorAcceptAction = ['accept', 'accepted'].includes(statusKey) || ['accept', 'accepted'].includes(vendorStatusKey);
 
   try {
     // Vendor accept is controlled by v_status so client-facing status can remain pending until driver progresses.

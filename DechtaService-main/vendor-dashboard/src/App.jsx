@@ -284,8 +284,14 @@ const App = () => {
   const handleUpdateStatus = async (id, status) => {
     try {
       const res = await updateOrderStatus(id, status);
-      setOrders(p => p.map(o => o.id === id ? res.data : o));
-    } catch { notify('Status update failed', 'error'); }
+      const updatedOrder = res?.data?.data || res?.data;
+      if (!updatedOrder) throw new Error('Missing updated order payload');
+      setOrders(p => p.map(o => o.id === id ? { ...o, ...updatedOrder } : o));
+      return updatedOrder;
+    } catch {
+      notify('Status update failed', 'error');
+      return null;
+    }
   };
 
   const handleOfflineBill = async ({ customerName, customerPhone, customerGst, address, items, totalAmount }) => {

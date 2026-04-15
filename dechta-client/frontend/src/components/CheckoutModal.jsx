@@ -69,6 +69,7 @@ export default function CheckoutModal({ open, onClose, onPay }) {
     // Delivery Vehicle State
     const [expandedVehicleType, setExpandedVehicleType] = useState(null);
     const [activeVehicleOptionId, setActiveVehicleOptionId] = useState(null);
+    const [selectedBodyType, setSelectedBodyType] = useState('');
 
     // Vehicles loaded from backend
     const [vehicles, setVehicles] = useState(DEFAULT_VEHICLES);
@@ -390,6 +391,8 @@ export default function CheckoutModal({ open, onClose, onPay }) {
         setExpandedVehicleType(expandedVehicleType === type ? null : type);
     };
 
+    const shouldAskBodyType = selectedVehicleCategory && ['3w', '4w'].includes(selectedVehicleCategory.type);
+
     // Alias for JSX usage
     const VEHICLES = vehicles;
 
@@ -689,6 +692,25 @@ export default function CheckoutModal({ open, onClose, onPay }) {
                                     );
                                 })}
                             </div>
+
+                            {shouldAskBodyType && (
+                                <div className="mt-4 p-4 border border-gray-200 dark:border-slate-700 rounded-xl bg-gray-50 dark:bg-slate-900">
+                                    <p className="text-xs font-black uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Vehicle Body Type</p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Select body type to match driver vehicle exactly.</p>
+                                    <div className="flex gap-2">
+                                        {['Open', 'Closed'].map((type) => (
+                                            <button
+                                                key={type}
+                                                type="button"
+                                                onClick={() => setSelectedBodyType(type)}
+                                                className={`flex-1 py-2 rounded-lg border text-sm font-bold transition ${selectedBodyType === type ? 'bg-black text-white border-black dark:bg-white dark:text-black dark:border-white' : 'bg-white text-gray-600 border-gray-200 dark:bg-slate-800 dark:text-gray-300 dark:border-slate-600'}`}
+                                            >
+                                                {type}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Additional Delivery Features */}
@@ -964,6 +986,10 @@ export default function CheckoutModal({ open, onClose, onPay }) {
                     {/* Bottom CTA */}
                     <div className="p-6 border-t border-gray-100 dark:border-slate-800">
                         <button onClick={() => {
+                            if (shouldAskBodyType && !selectedBodyType) {
+                                alert('Please select vehicle body type: Open or Closed');
+                                return;
+                            }
                             const finalInstructions = {
                                 quick: quickInstruction,
                                 custom: customInstruction,
@@ -991,6 +1017,7 @@ export default function CheckoutModal({ open, onClose, onPay }) {
                                      option_id: selectedVehicleOption?.id || null,
                                      option_name: selectedVehicleOption?.name || null,
                                      option_desc: selectedVehicleOption?.desc || null,
+                                     body_type: selectedBodyType || null,
                                      base_fare: Number(selectedVehicleCategory.base_fare || 0),
                                      option_fee: Number(selectedVehicleOption?.fee || 0),
                                      option_premium: vehicleOptionPremium,

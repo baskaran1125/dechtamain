@@ -57,42 +57,216 @@ async function filterDataForTable(tableName, data) {
   );
 }
 
-function normalizeVehicleType(vehicleType) {
-  if (!vehicleType) return null;
-  
-  const normalized = String(vehicleType).trim().toLowerCase();
-  
-  const typeMap = {
-    '2w': '2wheeler',
-    '2wheeler': '2wheeler',
-    '2-wheeler': '2wheeler',
-    '2 wheeler': '2wheeler',
-    'bike': '2wheeler',
-    'motorcycle': '2wheeler',
-    
-    '3w': '3wheeler',
-    '3wheeler': '3wheeler',
-    '3-wheeler': '3wheeler',
-    '3 wheeler': '3wheeler',
-    'auto': '3wheeler',
-    'tuk tuk': '3wheeler',
-    'auto rickshaw': '3wheeler',
-    
-    '4w': '4wheeler',
-    '4wheeler': '4wheeler',
-    '4-wheeler': '4wheeler',
-    '4 wheeler': '4wheeler',
-    'truck': '4wheeler',
-    'van': '4wheeler',
-    'mini truck': '4wheeler',
-  };
-  
-  return typeMap[normalized] || null;
-}
-
 function toNumberOrNull(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeToken(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-]+/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function canonicalVehicleClass(value) {
+  const token = normalizeToken(value);
+  if (!token) return '';
+  if (token.includes('2w') || token.includes('2wheel') || token.includes('bike') || token.includes('motorcycle')) return '2w';
+  if (token.includes('3w') || token.includes('3wheel') || token.includes('auto') || token.includes('autorickshaw')) return '3w';
+  if (token.includes('4w') || token.includes('4wheel') || token.includes('truck') || token.includes('van')) return '4w';
+  return token;
+}
+
+function normalizeModelId(value) {
+  const token = normalizeToken(value);
+  if (!token) return '';
+
+  const aliases = {
+    '3wstandard': '3w500kg',
+    '4w14ton': '4w1200kg',
+    '4w17ton': '4w1700kg',
+    '4w25ton': '4w2500kg',
+  };
+
+  return aliases[token] || token;
+}
+
+const VEHICLE_MODEL_SPECS = {
+  '2w_standard': { weight: 20, dimensions: '3 ft', bodyType: 'Open' },
+  '3w_500kg': { weight: 500, dimensions: '5.5 ft', bodyType: 'Open' },
+  '4w_750kg': { weight: 750, dimensions: '6 ft', bodyType: 'Closed' },
+  '4w_1200kg': { weight: 1200, dimensions: '7 ft', bodyType: 'Closed' },
+  '4w_1700kg': { weight: 1700, dimensions: '8 ft', bodyType: 'Closed' },
+  '4w_2500kg': { weight: 2500, dimensions: '10 ft', bodyType: 'Closed' },
+};
+
+const MODEL_TOKEN_TO_CANONICAL = Object.fromEntries(
+  Object.keys(VEHICLE_MODEL_SPECS).map((key) => [normalizeToken(key), key])
+);
+
+const MODEL_ALIASES = {
+  '3wstandard': '3w_500kg',
+  '4w14ton': '4w_1200kg',
+  '4w17ton': '4w_1700kg',
+  '4w25ton': '4w_2500kg',
+};
+
+function parseJsonObject(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function normalizeModelIdForStorage(modelId, vehicleType) {
+  const token = normalizeToken(modelId);
+  if (token) {
+    if (MODEL_ALIASES[token]) return MODEL_ALIASES[token];
+    if (MODEL_TOKEN_TO_CANONICAL[token]) return MODEL_TOKEN_TO_CANONICAL[token];
+  }
+
+  const klass = canonicalVehicleClass(vehicleType);
+  if (klass === '2w') return '2w_standard';
+  if (klass === '3w') return '3w_500kg';
+  if (klass === '4w') return '4w_750kg';
+  return null;
+}
+
+function normalizePhysicalDimension(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  const compact = raw.replace(/\s+/g, ' ');
+  const hasNumber = /\d/.test(compact);
+  const hasUnit = /(ft|feet|foot|cm|mm|m|inch|in)\b/.test(compact);
+  if (!hasNumber || !hasUnit) return null;
+
+  const normalized = compact
+    .replace(/feet|foot/g, 'ft')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized;
+}
+
+function normalizeBodyTypeForStorage(value, fallback) {
+  const token = String(value || '').trim().toLowerCase();
+  if (token === 'open' || token === 'closed') return token[0].toUpperCase() + token.slice(1);
+  return fallback || null;
+}
+
+function isLikelyModelIdToken(token) {
+  if (!token) return false;
+  return token.startsWith('2w') || token.startsWith('3w') || token.startsWith('4w');
+}
+
+function deriveWeightFromModelToken(modelToken) {
+  const token = normalizeModelId(modelToken);
+  if (!token) return null;
+  const match = token.match(/(\d{3,4})kg$/);
+  if (!match) return null;
+  return toNumberOrNull(match[1]);
+}
+
+function deriveModelIdFromVehicleClassAndWeight(vehicleClass, weightCapacity) {
+  if (vehicleClass !== '4w') return '';
+  const weight = toNumberOrNull(weightCapacity);
+  if (weight == null) return '';
+
+  const rounded = Math.round(weight);
+  const buckets = [750, 1200, 1700, 2500];
+  const exact = buckets.find((x) => x === rounded);
+  if (exact) return `4w${exact}kg`;
+
+  const nearest = buckets.reduce((best, current) => (
+    Math.abs(current - rounded) < Math.abs(best - rounded) ? current : best
+  ), buckets[0]);
+  return `4w${nearest}kg`;
+}
+
+function normalizeDimension(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  return raw
+    .replace(/feet|foot/g, 'ft')
+    .replace(/\s+/g, '')
+    .replace(/\.$/, '');
+}
+
+function isStrictBodyType(value) {
+  const token = normalizeToken(value);
+  return token === 'open' || token === 'closed';
+}
+
+function buildDriverVehicleMatcher(vehicle) {
+  const vehicleClass = canonicalVehicleClass(vehicle?.vehicle_type);
+  const explicitWeight = toNumberOrNull(vehicle?.weight_capacity ?? vehicle?.weight_capacity_kg);
+
+  const explicitModelCandidates = [
+    normalizeModelId(vehicle?.model_id),
+    normalizeModelId(vehicle?.selected_model_id),
+    normalizeModelId(vehicle?.specific_model_id),
+    normalizeModelId(vehicle?.vehicle_option_id),
+    normalizeModelId(vehicle?.option_id),
+  ].filter((token) => isLikelyModelIdToken(token));
+
+  const derivedWeightFromModels = explicitModelCandidates
+    .map((candidate) => deriveWeightFromModelToken(candidate))
+    .find((value) => value != null);
+
+  const weightCapacity = explicitWeight ?? derivedWeightFromModels ?? null;
+  const derivedModel = deriveModelIdFromVehicleClassAndWeight(vehicleClass, weightCapacity);
+  const modelCandidates = new Set(explicitModelCandidates);
+  if (derivedModel) modelCandidates.add(derivedModel);
+
+  return {
+    vehicleClass,
+    weightCapacity,
+    bodyType: String(vehicle?.body_type || '').trim().toLowerCase(),
+    dimensions: normalizeDimension(
+      vehicle?.dimensions ||
+      vehicle?.cargo_dimensions ||
+      vehicle?.load_dimensions ||
+      ''
+    ),
+    modelCandidates,
+  };
+}
+
+function matchesOrderWithDriverVehicle(order, matcher) {
+  const orderVehicleClass = canonicalVehicleClass(order?.vehicle_type);
+  if (!orderVehicleClass || !matcher?.vehicleClass || orderVehicleClass !== matcher.vehicleClass) {
+    return false;
+  }
+
+  const orderWeight = toNumberOrNull(order?.weight_capacity_requested);
+  if (orderWeight != null && matcher.weightCapacity != null && matcher.weightCapacity < orderWeight) {
+    return false;
+  }
+
+  const orderModel = normalizeModelId(order?.model_id_requested);
+  if (orderModel && matcher.modelCandidates.size > 0 && !matcher.modelCandidates.has(orderModel)) {
+    return false;
+  }
+
+  const orderDimensions = normalizeDimension(order?.dimensions_requested);
+  if (orderDimensions && matcher.dimensions && orderDimensions !== matcher.dimensions) {
+    return false;
+  }
+
+  const orderBodyType = String(order?.body_type_requested || '').trim().toLowerCase();
+  if (isStrictBodyType(orderBodyType)) {
+    if (!isStrictBodyType(matcher.bodyType)) return false;
+    if (orderBodyType !== matcher.bodyType) return false;
+  }
+
+  return true;
 }
 
 function isSchemaDriftError(error) {
@@ -102,26 +276,55 @@ function isSchemaDriftError(error) {
 }
 
 async function getDriverVehicleProfile(driverId) {
-  if (await tableExists('driver_vehicles')) {
-    const legacyVehicle = await db.selectOne('driver_vehicles', { driver_id: driverId });
-    if (legacyVehicle) {
-      return legacyVehicle;
-    }
-  }
+  const hasLegacy = await tableExists('driver_vehicles');
+  const hasUnified = await tableExists('vehicles');
 
-  if (await tableExists('vehicles')) {
-    const unifiedVehicle = await db.selectOne('vehicles', { driver_id: driverId });
-    if (unifiedVehicle) {
-      return {
-        vehicle_type:    unifiedVehicle.vehicle_type || null,
-        model_id:        unifiedVehicle.model_id || null,
-        weight_capacity: unifiedVehicle.weight_capacity || null,
-        body_type:       unifiedVehicle.body_type || null,
-      };
-    }
-  }
+  const legacyVehicle = hasLegacy ? await db.selectOne('driver_vehicles', { driver_id: driverId }) : null;
+  const unifiedVehicle = hasUnified ? await db.selectOne('vehicles', { driver_id: driverId }) : null;
 
-  return null;
+  if (!legacyVehicle && !unifiedVehicle) return null;
+
+  const pick = (...values) => {
+    for (const value of values) {
+      if (value === undefined || value === null) continue;
+      const text = String(value).trim();
+      if (text) return value;
+    }
+    return null;
+  };
+
+  return {
+    vehicle_type: pick(unifiedVehicle?.vehicle_type, legacyVehicle?.vehicle_type),
+    model_id: pick(
+      unifiedVehicle?.model_id,
+      unifiedVehicle?.selected_model_id,
+      unifiedVehicle?.specific_model_id,
+      unifiedVehicle?.option_id,
+      unifiedVehicle?.vehicle_option_id,
+      legacyVehicle?.model_id,
+      legacyVehicle?.selected_model_id,
+      legacyVehicle?.specific_model_id,
+      legacyVehicle?.option_id,
+      legacyVehicle?.vehicle_option_id
+    ),
+    weight_capacity: pick(
+      unifiedVehicle?.weight_capacity,
+      unifiedVehicle?.weight_capacity_kg,
+      legacyVehicle?.weight_capacity,
+      legacyVehicle?.weight_capacity_kg
+    ),
+    dimensions: pick(
+      unifiedVehicle?.dimensions,
+      unifiedVehicle?.cargo_dimensions,
+      unifiedVehicle?.load_dimensions,
+      legacyVehicle?.dimensions,
+      legacyVehicle?.cargo_dimensions,
+      legacyVehicle?.load_dimensions
+    ),
+    body_type: pick(unifiedVehicle?.body_type, legacyVehicle?.body_type),
+    vehicle_number: pick(unifiedVehicle?.vehicle_number, legacyVehicle?.vehicle_number, unifiedVehicle?.registration_number, legacyVehicle?.registration_number),
+    registration_number: pick(unifiedVehicle?.registration_number, legacyVehicle?.registration_number, unifiedVehicle?.vehicle_number, legacyVehicle?.vehicle_number),
+  };
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -144,15 +347,10 @@ async function getAvailableOrders(request, reply) {
       return reply.send({ success: true, data: [], isOnline: true });
     }
 
-    // Normalize vehicle type to standard format
-    const driverVehicleType = normalizeVehicleType(vehicle.vehicle_type);
-    const driverModelId = String(vehicle.model_id || '').trim();
-    const driverBodyType = String(vehicle.body_type || '').trim();
-    const parsedWeightCapacity = toNumberOrNull(vehicle.weight_capacity);
-    const driverWeightCapacity = parsedWeightCapacity != null ? parsedWeightCapacity : 999999;
+    const vehicleMatcher = buildDriverVehicleMatcher(vehicle);
 
-    // Validation: Ensure driver has a valid vehicle type
-    if (!driverVehicleType) {
+    // Validation: driver must have at least vehicle class + capacity for matching.
+    if (!vehicleMatcher.vehicleClass) {
       request.log.warn({ driverId, rawVehicleType: vehicle.vehicle_type }, 'Driver has no valid vehicle_type registered. Cannot fetch orders.');
       return reply.send({ success: true, data: [], isOnline: true });
     }
@@ -160,51 +358,40 @@ async function getAvailableOrders(request, reply) {
     const orderColumns = await getTableColumns('orders');
     const hasVendorStatusColumn = orderColumns.has('v_status');
 
+    if (!hasVendorStatusColumn) {
+      request.log.warn({ driverId }, 'orders.v_status column missing. Cannot apply vendor-accept visibility rule.');
+      return reply.send({ success: true, data: [], isOnline: true });
+    }
+
     const result = await db.query(
       `SELECT o.*
        FROM orders o
        WHERE LOWER(COALESCE(o.status::text, '')) = 'pending'
          AND o.driver_id IS NULL
-         ${hasVendorStatusColumn ? "AND LOWER(COALESCE(o.v_status::text, 'pending')) IN ('accepted', 'accept')" : ''}
-         AND (
-           o.vehicle_type IS NULL OR o.vehicle_type = '' OR 
-           LOWER(TRIM(o.vehicle_type)) = $1 OR
-           LOWER(TRIM(o.vehicle_type)) = $2 OR
-           LOWER(TRIM(o.vehicle_type)) = $3 OR
-           LOWER(TRIM(o.vehicle_type)) = $4
-         )
-         AND (o.model_id_requested IS NULL OR o.model_id_requested = '' OR $5 = '' OR LOWER(o.model_id_requested) = LOWER($5))
-         AND (o.weight_capacity_requested IS NULL OR o.weight_capacity_requested <= $6)
-         AND (
-           o.body_type_requested IS NULL OR o.body_type_requested = '' OR $7 = '' OR
-           LOWER(o.body_type_requested) = LOWER($7) OR
-           LOWER(o.body_type_requested) LIKE '%' || LOWER($7) || '%' OR
-           LOWER($7) LIKE '%' || LOWER(o.body_type_requested) || '%'
-         )
+         AND LOWER(COALESCE(o.v_status::text, 'pending')) = 'accepted'
        ORDER BY o.created_at DESC
-       LIMIT 20`,
-      [
-        driverVehicleType,           // $1 normalized (e.g., '3wheeler')
-        driverVehicleType.slice(0, 1) + 'w', // $2 shorthand (e.g., '3w')
-        driverVehicleType + 's',     // $3 plural variant (e.g., '3wheelers')
-        driverVehicleType.replace('wheeler', '-wheeler'), // $4 hyphenated (e.g., '3-wheeler')
-        driverModelId,               // $5
-        driverWeightCapacity,        // $6
-        driverBodyType,              // $7
-      ]
+       LIMIT 100`
     );
 
-    const mapped = (result.rows || []).map((o) => ({
-      ...o,
-      normalized_status: normalizeOrderStatus(o.status),
-    }));
+    const mapped = (result.rows || [])
+      .filter((o) => matchesOrderWithDriverVehicle(o, vehicleMatcher))
+      .slice(0, 20)
+      .map((o) => ({
+        ...o,
+        normalized_status: normalizeOrderStatus(o.status),
+      }));
+
+    const totalCandidates = (result.rows || []).length;
 
     // Log matching details for debugging
     request.log.debug({
       driverId,
-      driverVehicleType,
-      driverModelId,
-      driverBodyType,
+      driverVehicleClass: vehicleMatcher.vehicleClass,
+      driverModelCandidates: Array.from(vehicleMatcher.modelCandidates),
+      driverBodyType: vehicleMatcher.bodyType,
+      driverDimensions: vehicleMatcher.dimensions,
+      driverWeightCapacity: vehicleMatcher.weightCapacity,
+      totalCandidates,
       matchedOrdersCount: mapped.length,
     }, 'Orders fetched and matched');
 
@@ -325,30 +512,77 @@ async function acceptOrder(request, reply) {
 
   const client = await db.beginTransaction();
   try {
+    const orderColumns = await getTableColumns('orders');
     const profile = await db.selectOne('driver_profiles', { id: driverId });
+    const vehicle = await getDriverVehicleProfile(driverId);
+
+    const resolvedDriverName =
+      String(
+        profile?.full_name ||
+        profile?.name ||
+        request.driver?.full_name ||
+        request.driver?.name ||
+        ''
+      ).trim();
+    const resolvedDriverPhone =
+      String(
+        profile?.mobile_number ||
+        profile?.phone_number ||
+        request.driver?.mobile_number ||
+        request.driver?.phone_number ||
+        request.driver?.phone ||
+        ''
+      ).trim();
 
     // Generate OTP inline (don't use db.update which uses pool, not transaction)
     const deliveryOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
+    const setClauses = [
+      'driver_id     = $1',
+      'driver_name   = $2',
+      'driver_number = $3',
+      "status        = 'processing'",
+      'delivery_otp  = $4',
+    ];
+    const values = [
+      driverId,
+      resolvedDriverName,
+      resolvedDriverPhone,
+      deliveryOtp,
+    ];
+
+    const optionalDriverFields = [
+      ['driver_vehicle_type', vehicle?.vehicle_type],
+      ['driver_model_id', vehicle?.model_id],
+      ['driver_vehicle_model_id', vehicle?.model_id],
+      ['driver_weight_capacity', vehicle?.weight_capacity],
+      ['driver_vehicle_weight_capacity', vehicle?.weight_capacity],
+      ['driver_dimensions', vehicle?.dimensions],
+      ['driver_vehicle_dimensions', vehicle?.dimensions],
+      ['driver_body_type', vehicle?.body_type],
+      ['driver_vehicle_body_type', vehicle?.body_type],
+      ['driver_vehicle_number', vehicle?.vehicle_number || vehicle?.registration_number || null],
+      ['driver_registration_number', vehicle?.registration_number || vehicle?.vehicle_number || null],
+    ];
+
+    optionalDriverFields.forEach(([columnName, columnValue]) => {
+      if (!orderColumns.has(columnName)) return;
+      if (columnValue === undefined || columnValue === null || String(columnValue).trim() === '') return;
+      values.push(columnValue);
+      setClauses.push(`${columnName} = $${values.length}`);
+    });
+
+    const orderIdPlaceholder = values.length + 1;
+
     // ATOMIC: only succeeds if order is still Pending with no driver assigned
     const claimed = await client.query(
       `UPDATE orders
-       SET driver_id     = $1,
-           driver_name   = $2,
-           driver_number = $3,
-           status        = 'processing',
-           delivery_otp  = $4
-       WHERE id = $5
+       SET ${setClauses.join(',\n           ')}
+       WHERE id = $${orderIdPlaceholder}
          AND LOWER(COALESCE(status::text, '')) = 'pending'
          AND driver_id IS NULL
        RETURNING *`,
-      [
-        driverId,
-        profile?.full_name    || '',
-        profile?.mobile_number || '',
-        deliveryOtp,
-        orderId,
-      ]
+      [...values, orderId]
     );
 
     if (claimed.rows.length === 0) {
@@ -812,6 +1046,7 @@ async function getOrderHistory(request, reply) {
 //      was inserting client_name/client_phone — now aligned.
 // ──────────────────────────────────────────────────────────────
 async function createOrder(request, reply) {
+  const body = request.body || {};
   const {
     vendor_id, vendor_shop_name, product_name,
     // FIX: accept both customer_name (route schema) and client_name (legacy)
@@ -823,7 +1058,7 @@ async function createOrder(request, reply) {
     items_total, final_total, items,
     vehicle_type, model_id_requested, weight_capacity_requested,
     body_type_requested, dimensions_requested,
-  } = request.body;
+  } = body;
 
   // Normalise: prefer customer_name (new), fall back to client_name (legacy)
   const resolvedClientName  = customer_name  || client_name;
@@ -853,6 +1088,34 @@ async function createOrder(request, reply) {
     const resolvedDeliveryLongitude = toNumberOrNull(delivery_longitude);
     const resolvedPickupLatNum = toNumberOrNull(resolvedPickupLatitude);
     const resolvedPickupLngNum = toNumberOrNull(resolvedPickupLongitude);
+
+    const checkoutMeta = parseJsonObject(
+      body.order_meta || body.order_metadata || body.metadata || body.delivery_meta || body.checkout_meta
+    );
+    const vehicleMeta = parseJsonObject(body.vehicle || checkoutMeta.vehicle);
+    const resolvedVehicleType = vehicle_type || vehicleMeta.type || null;
+    const resolvedModelId = normalizeModelIdForStorage(
+      model_id_requested || body.vehicle_option_id || body.option_id || vehicleMeta.option_id,
+      resolvedVehicleType
+    );
+    const modelSpec = resolvedModelId ? (VEHICLE_MODEL_SPECS[resolvedModelId] || null) : null;
+    const resolvedWeightRequested =
+      toNumberOrNull(weight_capacity_requested) ??
+      toNumberOrNull(vehicleMeta.weight_capacity_kg ?? vehicleMeta.weight_capacity) ??
+      modelSpec?.weight ??
+      null;
+    const resolvedDimensionsRequested =
+      normalizePhysicalDimension(
+        dimensions_requested ||
+        body.vehicle_desc ||
+        body.option_desc ||
+        vehicleMeta.option_desc ||
+        vehicleMeta.option_name
+      ) || modelSpec?.dimensions || null;
+    const resolvedBodyTypeRequested = normalizeBodyTypeForStorage(
+      body_type_requested || vehicleMeta.body_type,
+      modelSpec?.bodyType || null
+    );
 
     let resolvedDistanceKm = toNumberOrNull(delivery_distance_km);
     let resolvedDeliveryFee = toNumberOrNull(delivery_fee) || 0;
@@ -924,11 +1187,11 @@ async function createOrder(request, reply) {
       items_total:               roundNumber(fallbackItemsTotal),
       final_total:               resolvedFinalTotal,
       items:                     items ? JSON.stringify(items) : null,
-      vehicle_type:              vehicle_type || null,
-      model_id_requested:        model_id_requested || null,
-      weight_capacity_requested: weight_capacity_requested || null,
-      body_type_requested:       body_type_requested || null,
-      dimensions_requested:      dimensions_requested || null,
+      vehicle_type:              resolvedVehicleType,
+      model_id_requested:        resolvedModelId,
+      weight_capacity_requested: resolvedWeightRequested,
+      body_type_requested:       resolvedBodyTypeRequested,
+      dimensions_requested:      resolvedDimensionsRequested,
       order_date:                new Date().toISOString(),
     });
 

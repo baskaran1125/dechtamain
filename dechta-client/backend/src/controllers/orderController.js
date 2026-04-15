@@ -108,6 +108,15 @@ const VEHICLE_MODEL_TO_CAPACITY_KG = {
   '4w_2500kg': 2500,
 };
 
+const VEHICLE_MODEL_TO_DIMENSIONS = {
+  '2w_standard': '3 ft',
+  '3w_500kg': '5.5 ft',
+  '4w_750kg': '6 ft',
+  '4w_1200kg': '7 ft',
+  '4w_1700kg': '8 ft',
+  '4w_2500kg': '10 ft',
+};
+
 const VEHICLE_TYPE_DEFAULT_MODEL = {
   '2w': '2w_standard',
   '3w': '3w_500kg',
@@ -143,9 +152,33 @@ const resolveRequestedWeightKg = (vehicle, modelId, vehicleType) => {
   return null;
 };
 
-const resolveBodyType = (vehicleType) => {
-  if (vehicleType === '2w' || vehicleType === '3w') return 'Open';
+const resolveBodyType = (vehicleType, rawBodyType) => {
+  const normalized = String(rawBodyType || '').trim().toLowerCase();
+  if (normalized === 'open' || normalized === 'closed') {
+    return normalized[0].toUpperCase() + normalized.slice(1);
+  }
+  if (vehicleType === '2w') return 'Open';
   return null;
+};
+
+const normalizePhysicalDimension = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  const compact = raw.replace(/\s+/g, ' ');
+  const hasNumber = /\d/.test(compact);
+  const hasUnit = /(ft|feet|foot|cm|mm|m|inch|in)\b/.test(compact);
+  if (!hasNumber || !hasUnit) return null;
+  return compact.replace(/feet|foot/g, 'ft').replace(/\s+/g, ' ').trim();
+};
+
+const resolveRequestedDimensions = (vehicle, modelId) => {
+  const explicit = normalizePhysicalDimension(vehicle?.dimensions || vehicle?.option_dimensions);
+  if (explicit) return explicit;
+
+  const fromLabel = normalizePhysicalDimension(vehicle?.option_name || vehicle?.option_desc);
+  if (fromLabel) return fromLabel;
+
+  return VEHICLE_MODEL_TO_DIMENSIONS[modelId || ''] || null;
 };
 
 const toJsonOrNull = (value) => {
@@ -161,6 +194,46 @@ const compactAddressText = (value) => String(value || '').replace(/\s+/g, ' ').t
 const toPositiveIntOrNull = (value) => {
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : null;
+};
+
+const sanitizeText = (value) => compactAddressText(value || '');
+
+const extractPincode = (...values) => {
+  for (const value of values) {
+    const match = String(value || '').match(/\b\d{6}\b/);
+    if (match) return match[0];
+  }
+  return '';
+};
+
+const buildResolvedDeliveryDetails = (deliveryAddress, rawDetails) => {
+  const details = rawDetails && typeof rawDetails === 'object' ? rawDetails : {};
+  const addressText = sanitizeText(deliveryAddress);
+  const parts = addressText
+    .split(',')
+    .map((part) => sanitizeText(part))
+    .filter(Boolean);
+
+  const line1 = sanitizeText(details.line1 || details.address_line1 || parts[0] || '');
+  const area = sanitizeText(details.area || parts[1] || parts[0] || '');
+  const city = sanitizeText(details.city || parts[2] || parts[1] || '');
+  const state = sanitizeText(details.state || parts[3] || parts[2] || '');
+  const pincode = sanitizeText(details.pincode || details.zip || extractPincode(details.pincode, details.zip, addressText));
+  const landmark = sanitizeText(details.landmark || '');
+  const tag = sanitizeText(details.tag || 'other') || 'other';
+
+  return {
+    tag,
+    line1,
+    area,
+    city,
+    state,
+    pincode,
+    landmark,
+    lat: toNumberOrNull(details.lat),
+    lng: toNumberOrNull(details.lng),
+    fullAddress: addressText,
+  };
 };
 
 const buildDeliveryNotes = (instructions) => {
@@ -263,6 +336,28 @@ const createOrder = asyncHandler(async (req, res) => {
     await client.query('BEGIN');
     await ensureOrderSchema(client);
 
+    const resolvedAddressDetails = buildResolvedDeliveryDetails(delivery_address, delivery_address_details);
+    const resolvedDeliveryAddressText = resolvedAddressDetails.fullAddress || sanitizeText(delivery_address || '');
+
+    if (!resolvedDeliveryAddressText) {
+      return err(res, 'Delivery address is required', 400);
+    }
+
+    const missingAddressFields = [
+      ['area', resolvedAddressDetails.area],
+      ['city', resolvedAddressDetails.city],
+      ['state', resolvedAddressDetails.state],
+      ['pincode', resolvedAddressDetails.pincode],
+    ].filter(([, value]) => !String(value || '').trim());
+
+    if (missingAddressFields.length > 0) {
+      return err(
+        res,
+        `Please provide complete delivery details: ${missingAddressFields.map(([name]) => name).join(', ')}`,
+        400
+      );
+    }
+
     const addressColumns = await getTableColumns(client, 'addresses');
     const orderColumns = await getTableColumns(client, 'orders');
     const deliveryFeeFromClient = toNumberOrNull(delivery_fee) ?? 0;
@@ -272,7 +367,12 @@ const createOrder = asyncHandler(async (req, res) => {
     const selectedVehicleType = normalizeVehicleType(vehicle?.type || vehicle?.name);
     const requestedModelId = normalizeModelId(vehicle?.option_id, selectedVehicleType);
     const requestedWeight = resolveRequestedWeightKg(vehicle, requestedModelId, selectedVehicleType);
-    const requestedBodyType = resolveBodyType(selectedVehicleType);
+    const requestedDimensions = resolveRequestedDimensions(vehicle, requestedModelId);
+    const requestedBodyType = resolveBodyType(selectedVehicleType, vehicle?.body_type);
+
+    if (selectedVehicleType && (selectedVehicleType === '3w' || selectedVehicleType === '4w') && !requestedBodyType) {
+      return err(res, 'Please select vehicle body type: Open or Closed', 400);
+    }
     const selectedOptionPremium = Math.max(
       0,
       toNumberOrNull(vehicle?.option_premium)
@@ -308,16 +408,16 @@ const createOrder = asyncHandler(async (req, res) => {
       const addressText = compactAddressText(delivery_address);
 
       addColumnValue(addrCols, addrVals, addressColumns, 'user_id', userId, { allowNull: false });
-      addColumnValue(addrCols, addrVals, addressColumns, 'tag', delivery_address_details?.tag || 'other');
+      addColumnValue(addrCols, addrVals, addressColumns, 'tag', resolvedAddressDetails.tag);
       addColumnValue(addrCols, addrVals, addressColumns, 'address_text', addressText, { allowNull: false });
       addColumnValue(addrCols, addrVals, addressColumns, 'is_default', false);
-      addColumnValue(addrCols, addrVals, addressColumns, 'lat', toNumberOrNull(delivery_address_details?.lat));
-      addColumnValue(addrCols, addrVals, addressColumns, 'lng', toNumberOrNull(delivery_address_details?.lng));
-      addColumnValue(addrCols, addrVals, addressColumns, 'area', delivery_address_details?.area || null);
-      addColumnValue(addrCols, addrVals, addressColumns, 'city', delivery_address_details?.city || null);
-      addColumnValue(addrCols, addrVals, addressColumns, 'state', delivery_address_details?.state || null);
-      addColumnValue(addrCols, addrVals, addressColumns, 'pincode', delivery_address_details?.pincode || null);
-      addColumnValue(addrCols, addrVals, addressColumns, 'landmark', delivery_address_details?.landmark || null);
+      addColumnValue(addrCols, addrVals, addressColumns, 'lat', resolvedAddressDetails.lat);
+      addColumnValue(addrCols, addrVals, addressColumns, 'lng', resolvedAddressDetails.lng);
+      addColumnValue(addrCols, addrVals, addressColumns, 'area', resolvedAddressDetails.area, { allowNull: false });
+      addColumnValue(addrCols, addrVals, addressColumns, 'city', resolvedAddressDetails.city, { allowNull: false });
+      addColumnValue(addrCols, addrVals, addressColumns, 'state', resolvedAddressDetails.state, { allowNull: false });
+      addColumnValue(addrCols, addrVals, addressColumns, 'pincode', resolvedAddressDetails.pincode, { allowNull: false });
+      addColumnValue(addrCols, addrVals, addressColumns, 'landmark', resolvedAddressDetails.landmark, { allowNull: false });
 
       const addrPlaceholders = addrVals.map((_, idx) => `$${idx + 1}`);
       await client.query('SAVEPOINT sp_address_insert');
@@ -339,7 +439,7 @@ const createOrder = asyncHandler(async (req, res) => {
             `INSERT INTO addresses (user_id, tag, address_text, is_default)
              VALUES ($1, $2, $3, false)
              RETURNING id`,
-            [userId, delivery_address_details?.tag || 'other', addressText]
+            [userId, resolvedAddressDetails.tag, addressText]
           );
           deliveryAddressId = fallbackAddr.rows[0].id;
           await client.query('RELEASE SAVEPOINT sp_address_insert');
@@ -378,8 +478,8 @@ const createOrder = asyncHandler(async (req, res) => {
       const taxAmount = 0;
       const finalAmount = orderAmount;
 
-      const dropLat = toNumberOrNull(delivery_address_details?.lat ?? item?.dest_lat);
-      const dropLng = toNumberOrNull(delivery_address_details?.lng ?? item?.dest_lng);
+      const dropLat = toNumberOrNull(resolvedAddressDetails.lat ?? item?.dest_lat);
+      const dropLng = toNumberOrNull(resolvedAddressDetails.lng ?? item?.dest_lng);
       let pickupLat = toNumberOrNull(item?.vendor_lat);
       let pickupLng = toNumberOrNull(item?.vendor_lng);
       if ((pickupLat == null || pickupLng == null) && safeVendorId) {
@@ -441,14 +541,24 @@ const createOrder = asyncHandler(async (req, res) => {
       addColumnValue(dbCols, dbVals, orderColumns, 'final_amount', finalAmount, { allowNull: false });
       addColumnValue(dbCols, dbVals, orderColumns, 'delivery_address_id', deliveryAddressId);
 
-      addColumnValue(dbCols, dbVals, orderColumns, 'customer_name', customer_name || null);
-      addColumnValue(dbCols, dbVals, orderColumns, 'customer_phone', customer_phone || null);
+      const resolvedCustomerName = customer_name || null;
+      const resolvedCustomerPhone = customer_phone || null;
+      if (orderColumns.has('customer_name')) {
+        addColumnValue(dbCols, dbVals, orderColumns, 'customer_name', resolvedCustomerName);
+      } else {
+        addColumnValue(dbCols, dbVals, orderColumns, 'client_name', resolvedCustomerName);
+      }
+
+      if (orderColumns.has('customer_phone')) {
+        addColumnValue(dbCols, dbVals, orderColumns, 'customer_phone', resolvedCustomerPhone);
+      } else {
+        addColumnValue(dbCols, dbVals, orderColumns, 'client_phone', resolvedCustomerPhone);
+      }
+
       addColumnValue(dbCols, dbVals, orderColumns, 'client_id', String(userId));
-      addColumnValue(dbCols, dbVals, orderColumns, 'client_name', customer_name || null);
-      addColumnValue(dbCols, dbVals, orderColumns, 'client_phone', customer_phone || null);
       addColumnValue(dbCols, dbVals, orderColumns, 'vendor_shop_name', item?.shop_name || null);
       addColumnValue(dbCols, dbVals, orderColumns, 'pickup_address', item?.shop_name || null);
-      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_address', compactAddressText(delivery_address || ''));
+      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_address', resolvedDeliveryAddressText);
       addColumnValue(dbCols, dbVals, orderColumns, 'vehicle_type', selectedVehicleType || vehicle?.type || null);
       addColumnValue(dbCols, dbVals, orderColumns, 'vehicle_option_id', vehicle?.option_id || null);
       addColumnValue(dbCols, dbVals, orderColumns, 'vehicle_name', vehicle?.name || vehicle?.option_name || null);
@@ -456,7 +566,7 @@ const createOrder = asyncHandler(async (req, res) => {
       addColumnValue(dbCols, dbVals, orderColumns, 'model_id_requested', requestedModelId);
       addColumnValue(dbCols, dbVals, orderColumns, 'model_name_requested', vehicle?.option_name || null);
       addColumnValue(dbCols, dbVals, orderColumns, 'weight_capacity_requested', requestedWeight);
-      addColumnValue(dbCols, dbVals, orderColumns, 'dimensions_requested', vehicle?.option_desc || null);
+      addColumnValue(dbCols, dbVals, orderColumns, 'dimensions_requested', requestedDimensions);
       addColumnValue(dbCols, dbVals, orderColumns, 'body_type_requested', requestedBodyType);
       addColumnValue(dbCols, dbVals, orderColumns, 'delivery_fee', computedDeliveryFee);
       addColumnValue(dbCols, dbVals, orderColumns, 'delivery_distance_km', computedDistanceKm);
@@ -465,12 +575,12 @@ const createOrder = asyncHandler(async (req, res) => {
       addColumnValue(dbCols, dbVals, orderColumns, 'items_total', orderAmount);
       addColumnValue(dbCols, dbVals, orderColumns, 'final_total', finalAmount + computedDeliveryFee + tipAmount);
       addColumnValue(dbCols, dbVals, orderColumns, 'order_type', 'delivery');
-      addColumnValue(dbCols, dbVals, orderColumns, 'address_tag', delivery_address_details?.tag || null);
-      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_area', delivery_address_details?.area || null);
-      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_city', delivery_address_details?.city || null);
-      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_state', delivery_address_details?.state || null);
-      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_pincode', delivery_address_details?.pincode || null);
-      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_landmark', delivery_address_details?.landmark || null);
+      addColumnValue(dbCols, dbVals, orderColumns, 'address_tag', resolvedAddressDetails.tag, { allowNull: false });
+      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_area', resolvedAddressDetails.area, { allowNull: false });
+      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_city', resolvedAddressDetails.city, { allowNull: false });
+      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_state', resolvedAddressDetails.state, { allowNull: false });
+      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_pincode', resolvedAddressDetails.pincode, { allowNull: false });
+      addColumnValue(dbCols, dbVals, orderColumns, 'delivery_landmark', resolvedAddressDetails.landmark, { allowNull: false });
       addColumnValue(dbCols, dbVals, orderColumns, 'pickup_latitude', pickupLat);
       addColumnValue(dbCols, dbVals, orderColumns, 'pickup_longitude', pickupLng);
       addColumnValue(dbCols, dbVals, orderColumns, 'drop_latitude', dropLat);
@@ -552,6 +662,15 @@ const createOrder = asyncHandler(async (req, res) => {
         addColumnValue(minimalCols, minimalVals, orderColumns, 'delivery_notes', buildDeliveryNotes(instructions));
         addColumnValue(minimalCols, minimalVals, orderColumns, 'customer_name', customer_name || null);
         addColumnValue(minimalCols, minimalVals, orderColumns, 'customer_phone', customer_phone || null);
+        addColumnValue(minimalCols, minimalVals, orderColumns, 'delivery_address', resolvedDeliveryAddressText);
+        addColumnValue(minimalCols, minimalVals, orderColumns, 'address_tag', resolvedAddressDetails.tag, { allowNull: false });
+        addColumnValue(minimalCols, minimalVals, orderColumns, 'delivery_area', resolvedAddressDetails.area, { allowNull: false });
+        addColumnValue(minimalCols, minimalVals, orderColumns, 'delivery_city', resolvedAddressDetails.city, { allowNull: false });
+        addColumnValue(minimalCols, minimalVals, orderColumns, 'delivery_state', resolvedAddressDetails.state, { allowNull: false });
+        addColumnValue(minimalCols, minimalVals, orderColumns, 'delivery_pincode', resolvedAddressDetails.pincode, { allowNull: false });
+        addColumnValue(minimalCols, minimalVals, orderColumns, 'delivery_landmark', resolvedAddressDetails.landmark, { allowNull: false });
+        addColumnValue(minimalCols, minimalVals, orderColumns, 'delivery_latitude', dropLat);
+        addColumnValue(minimalCols, minimalVals, orderColumns, 'delivery_longitude', dropLng);
         addColumnValue(minimalCols, minimalVals, orderColumns, 'delivery_fee', computedDeliveryFee);
         addColumnValue(minimalCols, minimalVals, orderColumns, 'delivery_distance_km', computedDistanceKm);
         addColumnValue(minimalCols, minimalVals, orderColumns, 'tip_amount', tipAmount);

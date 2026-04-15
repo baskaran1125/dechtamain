@@ -17,6 +17,32 @@ const GST_RATES = {
   'Other':             18,
 };
 
+const MAX_PRODUCT_IMAGES = 3;
+const MAX_IMAGE_DATA_URL_LENGTH = 1_500_000;
+
+function sanitizeProductImages(images) {
+  if (!images) return null;
+  if (!Array.isArray(images)) {
+    throw Object.assign(new Error('images must be an array'), { statusCode: 400 });
+  }
+
+  const normalized = images
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, MAX_PRODUCT_IMAGES);
+
+  for (const image of normalized) {
+    if (image.length > MAX_IMAGE_DATA_URL_LENGTH) {
+      throw Object.assign(
+        new Error('One or more images are too large. Please upload smaller images.'),
+        { statusCode: 413 }
+      );
+    }
+  }
+
+  return normalized.length ? normalized : null;
+}
+
 async function vendorCanAccessCatalog(vendorId) {
   const result = await db.query(
     `SELECT
@@ -92,6 +118,8 @@ async function createProduct(request, reply) {
   }
 
   try {
+    const normalizedImages = sanitizeProductImages(images);
+
     // products.vendor_id references vendor_profiles.id in unified schema.
     // Current auth still uses vendors.id, so ensure profile linkage exists.
     await db.query(
@@ -119,7 +147,7 @@ async function createProduct(request, reply) {
         parseFloat(selling_price), mrp ? parseFloat(mrp) : parseFloat(selling_price),
         total_price, stockQty, stockQty, unit || 'pcs',
         weight_kg ? parseFloat(weight_kg) : null,
-        images ? JSON.stringify(images) : null,
+        normalizedImages ? JSON.stringify(normalizedImages) : null,
         gst_percent !== undefined ? parseFloat(gst_percent) : 18,
       ]
     );

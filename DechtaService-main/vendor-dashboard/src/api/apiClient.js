@@ -2,7 +2,8 @@ import axios from 'axios';
 
 const resolveVendorApiBase = () => {
   if (import.meta.env.DEV) {
-    return '/api';
+    const devApi = import.meta.env.VITE_VENDOR_DEV_API_URL || 'http://localhost:5000';
+    return `${String(devApi).replace(/\/+$/, '')}/api`;
   }
 
   const raw = import.meta.env.VITE_VENDOR_API_URL || import.meta.env.VITE_API_URL || '';
@@ -84,7 +85,13 @@ export const getVendorQueries = ()    => api.get('/vendors/query');
 
 export const getOrders         = ()           => api.get('/vendors/orders');
 export const createOrder       = (data)       => api.post('/vendors/orders', data);
-export const updateOrderStatus = (id, status) => api.patch(`/vendors/orders/${id}/status`, { status });
+export const updateOrderStatus = (id, status) => {
+  const key = String(status || '').trim().toLowerCase();
+  const payload = ['accept', 'accepted'].includes(key)
+    ? { status, v_status: 'accepted' }
+    : { status };
+  return api.patch(`/vendors/orders/${id}/status`, payload);
+};
 
 export const getInvoices    = ()     => api.get('/billing/invoices');
 export const getInvoiceById = (id)   => api.get(`/billing/invoices/${id}`);

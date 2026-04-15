@@ -151,6 +151,7 @@ const OrderJourneyAnimation = ({ stage }) => {
 const OrdersPage = ({ orders=[], onUpdateStatus, notify, products, vendor }) => {
   const [filter, setFilter]   = useState('Pending');
   const [viewInvoice, setInvoice] = useState(null);
+  const [updatingOrderIds, setUpdatingOrderIds] = useState({});
   const withStatus = orders.map((o) => {
     const normalized = normalizeOrderStatus(o);
     return {
@@ -170,9 +171,12 @@ const OrdersPage = ({ orders=[], onUpdateStatus, notify, products, vendor }) => 
   const filtered  = withStatus.filter(o => o.uiStatus === filter);
   const recent    = [...withStatus].sort((a,b)=>String(b.id).localeCompare(String(a.id))).slice(0,5);
   const getActionConfig = (order) => {
-    const vendorAccepted = ['accepted', 'accept'].includes(String(order?.v_status || '').trim().toLowerCase());
-    if (order?.uiStatus === 'Pending' && !vendorAccepted) {
-      return { label: 'Accept', nextStatus: 'accepted' };
+    if (order?.uiStatus === 'Pending') {
+      const vendorAccepted = ['accepted', 'accept'].includes(String(order?.v_status || '').trim().toLowerCase());
+      if (vendorAccepted) {
+        return { label: 'Accepted', nextStatus: null, disabled: true };
+      }
+      return { label: 'Accept', nextStatus: 'accepted', disabled: false };
     }
     return null;
   };
@@ -228,15 +232,23 @@ const OrdersPage = ({ orders=[], onUpdateStatus, notify, products, vendor }) => 
                   <div className="text-xl font-bold text-[#0ceded]">₹ {Number(o.totalAmount).toLocaleString()}</div>
                   {getActionConfig(o) && (
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         const action = getActionConfig(o);
-                        if (!action) return;
-                        onUpdateStatus(o.id, action.nextStatus);
+                        if (!action || action.disabled || !action.nextStatus) return;
+                        setUpdatingOrderIds((prev) => ({ ...prev, [o.id]: true }));
+                        const updatedOrder = await onUpdateStatus(o.id, action.nextStatus);
+                        setUpdatingOrderIds((prev) => {
+                          const next = { ...prev };
+                          delete next[o.id];
+                          return next;
+                        });
+                        if (!updatedOrder) return;
                         notify(`Order updated: ${action.label}`, 'success');
                       }}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-[11px] font-bold shadow-lg shadow-blue-500/20"
+                      disabled={Boolean(updatingOrderIds[o.id]) || Boolean(getActionConfig(o)?.disabled)}
+                      className={`px-5 py-2 rounded-lg text-[11px] font-bold shadow-lg ${getActionConfig(o)?.disabled ? 'bg-gray-400 text-white cursor-not-allowed shadow-gray-500/20' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20'} ${updatingOrderIds[o.id] ? 'opacity-80 cursor-wait' : ''}`}
                     >
-                      {getActionConfig(o)?.label}
+                      {updatingOrderIds[o.id] ? 'Updating...' : getActionConfig(o)?.label}
                     </button>
                   )}
                   {(o.uiStatus==='Live'||o.uiStatus==='Completed') && (

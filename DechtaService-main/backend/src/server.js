@@ -78,6 +78,7 @@ const fastify = Fastify({
         : undefined,
   },
   trustProxy: true,
+  bodyLimit: 25 * 1024 * 1024,
 });
 
 // ──────────────────────────────────────────────────────────────

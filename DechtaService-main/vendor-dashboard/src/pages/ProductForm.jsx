@@ -21,6 +21,7 @@ const CATEGORY_OPTIONS = [
 // ── Heavy categories → auto self-delivery ────────────────────
 const HEAVY_CATEGORIES = ['sand', 'pvc pipe', 'steel', 'blue metal', 'blue metal (jalli)'];
 const isHeavyCategory  = (cat) => HEAVY_CATEGORIES.includes((cat || '').trim().toLowerCase());
+const MAX_PRODUCT_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
 
 // ── Category → HSN auto-fill map (first match per category) ──
 const CATEGORY_HSN_MAP = HARDWARE_DB.reduce((acc, item) => {
@@ -241,6 +242,13 @@ const ProductForm = ({ onSave, editingProduct, onCancel, notify }) => {
   const handleImages = (e) => {
     const files = Array.from(e.target.files);
     if ((form.images?.length || 0) + files.length > 3) return notify('Max 3 images', 'error');
+
+    const oversized = files.find((f) => f.size > MAX_PRODUCT_IMAGE_SIZE_BYTES);
+    if (oversized) {
+      notify('Each image must be 2MB or smaller', 'error');
+      return;
+    }
+
     files.forEach(f => {
       const r = new FileReader();
       r.onloadend = () => setForm(p => ({ ...p, images: [...(p.images || []), r.result] }));
