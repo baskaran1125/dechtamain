@@ -76,8 +76,16 @@ export default function BookingsView({ isPage = false, onBack }) {
                     </div>
                 ) : (
                     userData?.bookings?.map(b => {
-                        const steps = ['Placed', 'Processing', 'Dispatched', 'Delivered'];
-                        const currentStepIdx = steps.indexOf(b.status) === -1 ? 0 : steps.indexOf(b.status);
+                        const steps = ['Placed', 'Processing', 'Out for Delivery', 'Delivered'];
+                        // Map backend status to display status
+                        const statusMap = {
+                            'Placed': 'Placed',
+                            'Processing': 'Processing',
+                            'Dispatched': 'Out for Delivery',
+                            'Delivered': 'Delivered'
+                        };
+                        const displayStatus = statusMap[b.status] || b.status;
+                        const currentStepIdx = steps.indexOf(displayStatus) === -1 ? 0 : steps.indexOf(displayStatus);
                         const step = currentStepIdx + 1;
 
                         return (
@@ -93,7 +101,7 @@ export default function BookingsView({ isPage = false, onBack }) {
                                     {step === 4 ? (
                                         <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-1 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Completed</span>
                                     ) : (
-                                        <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-1 rounded-full flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> {b.status || 'Placed'}</span>
+                                        <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-1 rounded-full flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> {displayStatus || 'Placed'}</span>
                                     )}
                                 </div>
 

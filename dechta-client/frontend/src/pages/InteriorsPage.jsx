@@ -229,8 +229,8 @@ export default function InteriorsPage({ onBack, onOpenConsultant }) {
                                         Send me updates on <MessageCircle className="w-3.5 h-3.5 text-green-500" /> WhatsApp
                                     </label>
                                 </div>
-                                <select className="w-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg px-4 py-2.5 md:py-3.5 text-sm font-medium focus:outline-none text-gray-600 dark:text-gray-300 appearance-none cursor-pointer" required>
-                                    <option value="" disabled selected>Select City</option>
+                                <select defaultValue="" className="w-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg px-4 py-2.5 md:py-3.5 text-sm font-medium focus:outline-none text-gray-600 dark:text-gray-300 appearance-none cursor-pointer" required>
+                                    <option value="" disabled>Select City</option>
                                     <option value="chennai">Chennai</option>
                                     <option value="bangalore">Bangalore</option>
                                     <option value="hyderabad">Hyderabad</option>

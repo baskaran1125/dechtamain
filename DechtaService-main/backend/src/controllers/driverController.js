@@ -252,13 +252,12 @@ async function getProfile(request, reply) {
       bank = await safeOptionalSelectOne('bank_accounts', { user_id: profileUserId });
     }
 
-    let docs = null;
-    if (hasLegacyDocs) {
-      docs = await safeOptionalSelectOne('driver_documentss', { driver_id: driverId });
-    }
+    const docs = hasLegacyDocs
+      ? await safeOptionalSelectOne('driver_documentss', { driver_id: driverId })
+      : null;
 
     let docsFromUnified = null;
-    if (!docs && hasUnifiedDocs && profileUserId) {
+    if (hasUnifiedDocs && profileUserId) {
       const records = await safeOptionalSelectMany('user_documents', { user_id: profileUserId });
       const pick = (type) => (records || []).find((r) => r.document_type === type);
       docsFromUnified = {
@@ -270,10 +269,14 @@ async function getProfile(request, reply) {
     }
 
     const wallet = hasWallet ? await safeOptionalSelectOne('driver_wallets', { driver_id: driverId }) : null;
-    const [aadharFront, aadharBack] = splitDocUrl(docs?.aadhar_url);
-    const [panFront, panBack] = splitDocUrl(docs?.pan_url);
-    const [licenseFront, licenseBack] = splitDocUrl(docs?.license_url);
-    const [rcFront, rcBack] = splitDocUrl(docs?.rc_url);
+    const [aadharFrontLegacy, aadharBackLegacy] = splitDocUrl(docs?.aadhar_url);
+    const [panFrontLegacy, panBackLegacy] = splitDocUrl(docs?.pan_url);
+    const [licenseFrontLegacy, licenseBackLegacy] = splitDocUrl(docs?.license_url);
+    const [rcFrontLegacy, rcBackLegacy] = splitDocUrl(docs?.rc_url);
+    const [aadharFrontUnified, aadharBackUnified] = splitDocUrl(docsFromUnified?.aadhar?.document_url || '');
+    const [panFrontUnified, panBackUnified] = splitDocUrl(docsFromUnified?.pan?.document_url || '');
+    const [licenseFrontUnified, licenseBackUnified] = splitDocUrl(docsFromUnified?.license?.document_url || '');
+    const [rcFrontUnified, rcBackUnified] = splitDocUrl(docsFromUnified?.rc?.document_url || '');
     const verificationStatus =
       docs?.verification_status ||
       docsFromUnified?.aadhar?.status ||
@@ -282,12 +285,12 @@ async function getProfile(request, reply) {
       docsFromUnified?.rc?.status ||
       null;
     const userStatus = String(profileUser?.status || '').toLowerCase();
-    const userVerification = String(profileUser?.verification_status || '').toLowerCase();
-    const userRejected = userStatus === 'suspended' || userStatus === 'banned' || userVerification === 'rejected';
-    const effectiveApproved = !userRejected && (
-      !!profile.is_approved ||
-      !!profileUser?.is_approved ||
-      userVerification === 'verified'
+    const userVerification = String(profileUser?.verification_status || profileUser?.kyc_status || '').toLowerCase();
+    const userRejected = ['rejected', 'blocked', 'inactive'].includes(userStatus) || userVerification === 'rejected';
+    const effectiveApproved = Boolean(
+      profile.is_approved ??
+      profileUser?.is_approved ??
+      (!userRejected && ['approved', 'verified', 'active'].includes(userStatus || userVerification))
     );
 
     // Shape the response — profile screen expects these separate objects
@@ -340,20 +343,20 @@ async function getProfile(request, reply) {
           is_verified:         bank.bank_verified || bank.is_verified,
         } : null,
         documents: {
-          aadhar_front_url:              aadharFront || docsFromUnified?.aadhar?.front_url || null,
-          aadhar_back_url:               aadharBack || docsFromUnified?.aadhar?.back_url || null,
+          aadhar_front_url:              aadharFrontLegacy || aadharFrontUnified || docsFromUnified?.aadhar?.front_url || null,
+          aadhar_back_url:               aadharBackLegacy || aadharBackUnified || docsFromUnified?.aadhar?.back_url || null,
           aadhar_status:                 docs?.verification_status || docsFromUnified?.aadhar?.status || null,
-          pan_front_url:                 panFront || docsFromUnified?.pan?.front_url || null,
-          pan_back_url:                  panBack || docsFromUnified?.pan?.back_url || null,
+          pan_front_url:                 panFrontLegacy || panFrontUnified || docsFromUnified?.pan?.front_url || null,
+          pan_back_url:                  panBackLegacy || panBackUnified || docsFromUnified?.pan?.back_url || null,
           pan_status:                    docs?.verification_status || docsFromUnified?.pan?.status || null,
-          license_front_url:             licenseFront || docsFromUnified?.license?.front_url || null,
-          license_back_url:              licenseBack || docsFromUnified?.license?.back_url || null,
+          license_front_url:             licenseFrontLegacy || licenseFrontUnified || docsFromUnified?.license?.front_url || null,
+          license_back_url:              licenseBackLegacy || licenseBackUnified || docsFromUnified?.license?.back_url || null,
           license_status:                docs?.verification_status || docsFromUnified?.license?.status || null,
-          rc_front_url:                  rcFront || docsFromUnified?.rc?.front_url || null,
-          rc_back_url:                   rcBack || docsFromUnified?.rc?.back_url || null,
+          rc_front_url:                  rcFrontLegacy || rcFrontUnified || docsFromUnified?.rc?.front_url || null,
+          rc_back_url:                   rcBackLegacy || rcBackUnified || docsFromUnified?.rc?.back_url || null,
           rc_status:                     docs?.verification_status || docsFromUnified?.rc?.status || null,
           verification_status:           verificationStatus,
-          verification_rejection_reason: null,
+          verification_rejection_reason: docs?.rejection_reason || docsFromUnified?.aadhar?.rejection_reason || null,
           kyc_complete:                  verificationStatus === 'verified',
         },
         wallet: {
@@ -901,6 +904,7 @@ async function uploadDocument(request, reply) {
 
     const hasLegacyDocs = await tableExists('driver_documentss');
     const hasUnifiedDocs = await tableExists('user_documents');
+    const userId = request.driver.user_id || null;
     let wroteDocument = false;
 
     if (hasLegacyDocs) {
@@ -926,11 +930,7 @@ async function uploadDocument(request, reply) {
       }
     }
 
-    if (!wroteDocument && hasUnifiedDocs) {
-      const userId = request.driver.user_id;
-      if (!userId) {
-        return reply.code(400).send({ success: false, message: 'Driver user mapping missing.' });
-      }
+    if (hasUnifiedDocs && userId) {
       const existing = await db.selectOne('user_documents', { user_id: userId, document_type: docType });
       const docPayload = await filterDataForTable('user_documents', {
         user_id: userId,
@@ -1023,21 +1023,21 @@ async function updateDocument(request, reply) {
         const currentUrls = legacyDoc[fieldMapUrl[docType]] || '';
         urlParts = currentUrls.includes(',') ? currentUrls.split(',') : [currentUrls, ''];
       }
-    } else if (hasUnifiedDocs) {
-      if (!driverUserId) {
-        return reply.code(400).send({ success: false, message: 'Driver user mapping missing for unified documents.' });
-      }
+    }
 
+    if (hasUnifiedDocs && driverUserId) {
       unifiedDoc = await safeOptionalSelectOne('user_documents', {
         user_id: driverUserId,
         document_type: docType,
       });
 
       const [docFront, docBack] = splitDocUrl(unifiedDoc?.document_url || '');
-      urlParts = [
+      const unifiedParts = [
         unifiedDoc?.front_url || docFront || '',
         unifiedDoc?.back_url || docBack || '',
       ];
+      if (!urlParts[0] && unifiedParts[0]) urlParts[0] = unifiedParts[0];
+      if (!urlParts[1] && unifiedParts[1]) urlParts[1] = unifiedParts[1];
     }
 
     if (frontImageBuffer) {
@@ -1071,7 +1071,9 @@ async function updateDocument(request, reply) {
           verification_status: updateData.verification_status || 'pending',
         });
       }
-    } else {
+    }
+
+    if (hasUnifiedDocs && driverUserId) {
       const unifiedFront = urlParts[0] || null;
       const unifiedBack = urlParts[1] || null;
       const hasUnifiedFront = !!unifiedFront;

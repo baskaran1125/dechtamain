@@ -406,6 +406,118 @@ async function getAvailableOrders(request, reply) {
 }
 
 // ──────────────────────────────────────────────────────────────
+// GET /api/orders/debug/vehicle-match
+// Diagnostic endpoint to debug why orders aren't matching driver vehicle
+// ──────────────────────────────────────────────────────────────
+async function debugVehicleMatch(request, reply) {
+  const driverId = request.driver.id;
+
+  try {
+    // Get driver's vehicle profile
+    const vehicle = await getDriverVehicleProfile(driverId);
+    if (!vehicle) {
+      return reply.send({
+        success: true,
+        debug: {
+          driverId,
+          vehicleProfile: null,
+          message: 'No vehicle profile found for driver'
+        }
+      });
+    }
+
+    const vehicleMatcher = buildDriverVehicleMatcher(vehicle);
+
+    // Get sample orders
+    const result = await db.query(
+      `SELECT id, vehicle_type, model_id_requested, weight_capacity_requested, 
+              body_type_requested, dimensions_requested, status, v_status
+       FROM orders
+       WHERE LOWER(COALESCE(status::text, '')) = 'pending'
+         AND driver_id IS NULL
+         AND LOWER(COALESCE(v_status::text, 'pending')) = 'accepted'
+       LIMIT 10`
+    );
+
+    const orders = result.rows || [];
+    const matchDetails = orders.map(order => ({
+      orderId: order.id,
+      orderVehicleType: order.vehicle_type,
+      orderVehicleClass: canonicalVehicleClass(order.vehicle_type),
+      orderModelId: order.model_id_requested,
+      orderWeight: order.weight_capacity_requested,
+      orderBodyType: order.body_type_requested,
+      orderDimensions: order.dimensions_requested,
+      matched: matchesOrderWithDriverVehicle(order, vehicleMatcher),
+      failureReasons: getMatchFailureReasons(order, vehicleMatcher)
+    }));
+
+    return reply.send({
+      success: true,
+      debug: {
+        driverId,
+        driverVehicle: vehicle,
+        vehicleMatcher: {
+          vehicleClass: vehicleMatcher.vehicleClass,
+          modelCandidates: Array.from(vehicleMatcher.modelCandidates),
+          weightCapacity: vehicleMatcher.weightCapacity,
+          bodyType: vehicleMatcher.bodyType,
+          dimensions: vehicleMatcher.dimensions,
+        },
+        totalOrdersChecked: orders.length,
+        matchedCount: matchDetails.filter(m => m.matched).length,
+        orderMatchDetails: matchDetails
+      }
+    });
+  } catch (error) {
+    request.log.error(error);
+    return reply.code(500).send({
+      success: false,
+      message: 'Failed to debug vehicle match',
+      error: error.message
+    });
+  }
+}
+
+// Helper function to get detailed failure reasons
+function getMatchFailureReasons(order, matcher) {
+  const reasons = [];
+  
+  const orderVehicleClass = canonicalVehicleClass(order?.vehicle_type);
+  if (!orderVehicleClass || !matcher?.vehicleClass) {
+    reasons.push('Vehicle class missing');
+  } else if (orderVehicleClass !== matcher.vehicleClass) {
+    reasons.push(`Vehicle class mismatch: order needs ${orderVehicleClass}, driver has ${matcher.vehicleClass}`);
+  }
+
+  const orderWeight = toNumberOrNull(order?.weight_capacity_requested);
+  if (orderWeight != null && matcher.weightCapacity != null && matcher.weightCapacity < orderWeight) {
+    reasons.push(`Weight capacity insufficient: order needs ${orderWeight}kg, driver has ${matcher.weightCapacity}kg`);
+  }
+
+  const orderModel = normalizeModelId(order?.model_id_requested);
+  if (orderModel && matcher.modelCandidates.size > 0 && !matcher.modelCandidates.has(orderModel)) {
+    reasons.push(`Model mismatch: order needs ${orderModel}, driver models: ${Array.from(matcher.modelCandidates).join(', ')}`);
+  }
+
+  const orderDimensions = normalizeDimension(order?.dimensions_requested);
+  if (orderDimensions && matcher.dimensions && orderDimensions !== matcher.dimensions) {
+    reasons.push(`Dimensions mismatch: order needs ${orderDimensions}, driver has ${matcher.dimensions}`);
+  }
+
+  const orderBodyType = String(order?.body_type_requested || '').trim().toLowerCase();
+  if (isStrictBodyType(orderBodyType)) {
+    if (!isStrictBodyType(matcher.bodyType)) {
+      reasons.push(`Body type strict but driver has none`);
+    } else if (orderBodyType !== matcher.bodyType) {
+      reasons.push(`Body type mismatch: order needs ${orderBodyType}, driver has ${matcher.bodyType}`);
+    }
+  }
+
+  return reasons.length === 0 ? ['All checks passed - should match'] : reasons;
+}
+
+// ──────────────────────────────────────────────────────────────
 // GET /api/orders/active
 // FIX: alias all order columns explicitly so client receives a
 //      flat row with no ambiguous column names.
@@ -1224,4 +1336,5 @@ module.exports = {
   cancelTrip,
   getOrderHistory,
   createOrder,
+  debugVehicleMatch,
 };

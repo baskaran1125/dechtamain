@@ -196,16 +196,24 @@ const App = () => {
 
   const fetchAll = async () => {
     try {
-      const [vRes, pRes, oRes, sRes, iRes] = await Promise.allSettled([
-        getProfile(), getProducts(), getOrders(), getSettlements(), getInvoices(),
-      ]);
+      const vRes = await getProfile();
+      const nextVendor = extractVendorPayload(vRes?.data);
+      setVendor(nextVendor);
 
-      if (vRes.status === 'fulfilled') {
-        setVendor(extractVendorPayload(vRes.value?.data));
+      const catalogUnlocked = isVendorApprovedForCatalog(nextVendor);
+      const requests = [getOrders(), getSettlements(), getInvoices()];
+
+      if (catalogUnlocked) {
+        requests.unshift(getProducts());
+      } else {
+        setProducts([]);
       }
 
-      if (pRes.status === 'fulfilled') {
-        setProducts(pRes.value.data?.products || pRes.value.data?.data || []);
+      const results = await Promise.allSettled(requests);
+      const [maybeProducts, oRes, sRes, iRes] = catalogUnlocked ? results : [null, ...results];
+
+      if (catalogUnlocked && maybeProducts?.status === 'fulfilled') {
+        setProducts(maybeProducts.value.data?.products || maybeProducts.value.data?.data || []);
       }
 
       if (oRes.status === 'fulfilled') {
@@ -220,7 +228,7 @@ const App = () => {
         setInvoices(iRes.value.data?.invoices || iRes.value.data?.data || []);
       }
 
-      const failures = [vRes, pRes, oRes, sRes, iRes].filter((r) => r.status === 'rejected');
+      const failures = results.filter((r) => r.status === 'rejected');
       const unauthorized = failures.some((r) => r.reason?.response?.status === 401);
       if (unauthorized) {
         localStorage.removeItem('dechta_token');

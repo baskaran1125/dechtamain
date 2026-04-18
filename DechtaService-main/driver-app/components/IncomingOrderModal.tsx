@@ -73,7 +73,7 @@ export default function IncomingOrderModal({ order, onAccept, onDecline }: Incom
       <View style={styles.overlay}>
         
         {/* RADAR PING ANIMATION BACKGROUND */}
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <View style={StyleSheet.absoluteFill}>
           <Animated.View style={[styles.pingCircle, {
             transform: [{ scale: pingAnim1.interpolate({ inputRange: [0, 1], outputRange: [0.3, 2.5] }) }],
             opacity: pingAnim1.interpolate({ inputRange: [0, 0.8, 1], outputRange: [0.6, 0, 0] })
@@ -179,11 +179,11 @@ const styles = StyleSheet.create({
   pingCircle: { position: 'absolute', top: '50%', left: '50%', width: 200, height: 200, marginLeft: -100, marginTop: -100, borderRadius: 100, backgroundColor: '#0284C7' },
 
   // Modal Container
-  modalContent: { width: '100%', backgroundColor: '#FFF', borderTopLeftRadius: 40, borderTopRightRadius: 40, padding: 24, paddingTop: 40, paddingBottom: 40, shadowColor: '#000', shadowOffset: { width: 0, height: -10 }, shadowOpacity: 0.2, shadowRadius: 20, elevation: 20 },
+  modalContent: { width: '100%', backgroundColor: '#FFF', borderTopLeftRadius: 40, borderTopRightRadius: 40, padding: 24, paddingTop: 40, paddingBottom: 40, elevation: 20, boxShadow: '0px -10px 20px rgba(0,0,0,0.2)' },
 
   // Top Overlapping Timer
   timerContainer: { position: 'absolute', top: -48, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
-  timerBox: { width: 104, height: 104, borderRadius: 52, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.15, shadowRadius: 10, elevation: 10 },
+  timerBox: { width: 104, height: 104, borderRadius: 52, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', elevation: 10, boxShadow: '0px 5px 10px rgba(0,0,0,0.15)' },
   timerTextCont: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
   timerNumber: { fontSize: 28, fontWeight: '900', color: '#0F172A' },
   timerNumberDanger: { color: '#EF4444' },
@@ -214,6 +214,6 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: 'row', gap: 12 },
   declineBtn: { flex: 1, paddingVertical: 18, borderRadius: 16, borderWidth: 2, borderColor: '#E2E8F0', alignItems: 'center', backgroundColor: '#FFF' },
   declineText: { fontSize: 16, fontWeight: 'bold', color: '#475569' },
-  acceptBtn: { flex: 1, paddingVertical: 18, borderRadius: 16, backgroundColor: '#0284C7', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: '#0284C7', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.4, shadowRadius: 10, elevation: 8 },
+  acceptBtn: { flex: 1, paddingVertical: 18, borderRadius: 16, backgroundColor: '#0284C7', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', elevation: 8, boxShadow: '0px 5px 10px rgba(2,132,199,0.4)' },
   acceptText: { fontSize: 16, fontWeight: '900', color: '#FFF' }
 });

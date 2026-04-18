@@ -5,6 +5,7 @@
 // ──────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { Platform } from 'react-native';
 import { io } from 'socket.io-client';
 import { TokenStore, DriverStore, DRIVER_BACKEND_URL } from '../services/api';
 
@@ -18,6 +19,8 @@ export function useSocket({ onNewOrder, onOrderUpdate, onNotification } = {}) {
     let socket;
 
     const connect = async () => {
+      if (Platform.OS === 'web') return;
+
       const token = await TokenStore.get();
       const driver = await DriverStore.get();
 

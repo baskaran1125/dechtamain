@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import ReactDOM from 'react-dom';
 import { Icons } from '../ui/Icons';
+import api from '../../api/apiClient';
 
 export const WithdrawMoneyModal = ({ currentBalance, onClose, onSuccess, notify }) => {
   const [step, setStep] = useState('amount'); // amount | bank | confirm | success
@@ -42,27 +43,14 @@ export const WithdrawMoneyModal = ({ currentBalance, onClose, onSuccess, notify 
   const handleWithdrawal = async () => {
     setProcessing(true);
     try {
-      const token = localStorage.getItem('dechta_token');
-      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/vendors/wallet/withdraw`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          amount: parseInt(amount),
-          withdrawalMethod: bankDetails.upiId ? 'upi' : 'bank',
-          upiId: bankDetails.upiId || undefined,
-          accountNumber: bankDetails.accountNumber || undefined,
-          ifscCode: bankDetails.ifscCode || undefined,
-          accountName: bankDetails.accountName || undefined,
-        }),
+      await api.post('/vendors/wallet/withdraw', {
+        amount: parseInt(amount),
+        withdrawalMethod: bankDetails.upiId ? 'upi' : 'bank',
+        upiId: bankDetails.upiId || undefined,
+        accountNumber: bankDetails.accountNumber || undefined,
+        ifscCode: bankDetails.ifscCode || undefined,
+        accountName: bankDetails.accountName || undefined,
       });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Withdrawal failed');
-      }
 
       setProcessing(false);
       setStep('success');

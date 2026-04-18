@@ -129,9 +129,11 @@ export default function App() {
   const { addToCart: cartAddToCart, clearCart, cart } = useCart();
   const { authLoading, isLoggedIn, userData, toggleWishlist, addBooking, setBookings } = useAuth();
 
+  // ── Real-time polling for order status updates ──────────────
   useEffect(() => {
     if (!isLoggedIn) return;
 
+    // Initial fetch
     fetchMyOrders()
       .then((res) => {
         if (res.success && Array.isArray(res.data)) {
@@ -141,6 +143,21 @@ export default function App() {
       .catch((e) => {
         console.warn('[APP] fetchMyOrders failed:', e.message);
       });
+
+    // Set up polling interval to refresh orders every 5 seconds
+    const pollInterval = setInterval(() => {
+      fetchMyOrders()
+        .then((res) => {
+          if (res.success && Array.isArray(res.data)) {
+            setBookings(res.data);
+          }
+        })
+        .catch((e) => {
+          console.warn('[APP] fetchMyOrders polling failed:', e.message);
+        });
+    }, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(pollInterval);
   }, [isLoggedIn, setBookings]);
 
   useEffect(() => {

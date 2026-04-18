@@ -24,12 +24,6 @@
 }
 
 @layer base {
-  @font-face {
-    font-family: 'Inter';
-    font-display: swap;
-    src: url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-  }
-
   button {
     transition-property: all;
     transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);

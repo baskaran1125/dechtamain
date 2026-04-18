@@ -11,6 +11,7 @@ const {
   completeDelivery,
   cancelTrip,
   getOrderHistory,
+  debugVehicleMatch,
 } = require('../controllers/ordersController');
 
 async function orderRoutes(fastify) {
@@ -20,6 +21,12 @@ async function orderRoutes(fastify) {
   fastify.get('/available', {
     preHandler: [requireApproved],
     handler: getAvailableOrders,
+  });
+
+  // GET /api/orders/debug/vehicle-match - Diagnostic endpoint
+  fastify.get('/debug/vehicle-match', {
+    preHandler: [requireApproved],
+    handler: debugVehicleMatch,
   });
 
   // GET /api/orders/history

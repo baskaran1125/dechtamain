@@ -145,6 +145,7 @@ async function registerRoutes() {
   await fastify.register(require('./routes/orders'),   { prefix: '/api/orders' });
   await fastify.register(require('./routes/earnings'), { prefix: '/api/earnings' });
   await fastify.register(require('./routes/wallet'),   { prefix: '/api/wallet' });
+  await fastify.register(require('./routes/location'),  { prefix: '/api/location' });
   await fastify.register(require('./routes/misc'),     { prefix: '/api' });
 
   // ── Vendor routes ──────────────────────────────────────────

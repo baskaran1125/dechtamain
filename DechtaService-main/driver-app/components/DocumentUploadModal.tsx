@@ -65,10 +65,9 @@ export default function DocumentUploadModal({
   };
 
   const themeStyles = isDark ? darkTheme : lightTheme;
-  const isBothUploaded = frontImageUri && backImageUri;
+  const isBothUploaded = !!frontImageUri && !!backImageUri;
 
   return (
-    <>
       <Modal visible={visible} animationType="slide" transparent={false}>
         <View style={[styles.container, themeStyles.container]}>
           {/* Header */}
@@ -155,6 +154,7 @@ export default function DocumentUploadModal({
                 <Image
                   source={{ uri: frontImageUri }}
                   style={styles.preview}
+                  resizeMode="cover"
                   onError={() => console.log('Image load failed')}
                 />
                 <TouchableOpacity
@@ -210,6 +210,7 @@ export default function DocumentUploadModal({
                 <Image
                   source={{ uri: backImageUri }}
                   style={styles.preview}
+                  resizeMode="cover"
                   onError={() => console.log('Image load failed')}
                 />
                 <TouchableOpacity
@@ -269,7 +270,6 @@ export default function DocumentUploadModal({
         </View>
       </View>
     </Modal>
-    </>
   );
 }
 
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
   uploadHint: { fontSize: 12, textAlign: 'center' },
 
   previewContainer: { borderRadius: 16, overflow: 'hidden', backgroundColor: '#f1f5f9' },
-  preview: { width: '100%', height: 250, resizeMode: 'cover' },
+  preview: { width: '100%', height: 250 },
   changeBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12 },
   changeBtnText: { fontSize: 14, fontWeight: '600', color: '#0284c7' },
 

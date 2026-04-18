@@ -136,15 +136,25 @@ function NewOrderPopup({ order, isPrime, onAccept, onDecline }: any) {
               </View>
 
               <View
-                style={[styles.actionRow, timeLeft > 0 && !isPrime && { opacity: 0.5 }]}
-                pointerEvents={timeLeft > 0 && !isPrime ? "none" : "auto"}
+                style={[
+                  styles.actionRow,
+                  timeLeft > 0 && !isPrime && { opacity: 0.5 },
+                ]}
               >
-                <TouchableOpacity onPress={() => onDecline(order?.id)} style={styles.declineBtn}>
+                <TouchableOpacity
+                  onPress={() => onDecline(order?.id)}
+                  disabled={timeLeft > 0 && !isPrime}
+                  style={styles.declineBtn}
+                >
                   <Feather name="x-circle" size={18} color="#DC2626" style={{ marginRight: 6 }} />
                   <Text style={styles.declineText}>Decline</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity onPress={() => onAccept(order?.id)} style={{ flex: 1 }}>
+                <TouchableOpacity
+                  onPress={() => onAccept(order?.id)}
+                  disabled={timeLeft > 0 && !isPrime}
+                  style={{ flex: 1 }}
+                >
                   <LinearGradient colors={["#22C55E", "#059669"]} style={styles.acceptBtn}>
                     <Feather name="check" size={18} color="#fff" style={{ marginRight: 6 }} />
                     <Text style={styles.acceptText}>Accept</Text>
@@ -831,10 +841,10 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 10, fontWeight: "600" },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 8 },
 
-  toggleSwitch: { width: 60, height: 34, borderRadius: 17, justifyContent: "center", shadowColor: "#000", shadowOpacity: 0.1, shadowOffset: { width: 0, height: 2 } },
+  toggleSwitch: { width: 60, height: 34, borderRadius: 17, justifyContent: "center", boxShadow: "0px 2px 4px rgba(0,0,0,0.1)" },
   toggleLabels: { position: "absolute", width: "100%", flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 8 },
   toggleLabelText: { fontSize: 9, fontWeight: "900", color: "#FFF" },
-  toggleKnob: { width: 30, height: 30, borderRadius: 15, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 3 },
+  toggleKnob: { width: 30, height: 30, borderRadius: 15, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", boxShadow: "0px 1px 3px rgba(0,0,0,0.2)" },
 
   iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   themeBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
@@ -842,7 +852,7 @@ const styles = StyleSheet.create({
   langBadgeText: { color: "#fff", fontSize: 8, fontWeight: "bold", textTransform: "uppercase" },
   notifBadge: { position: "absolute", top: -2, right: -2, backgroundColor: "#EF4444", width: 14, height: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" },
 
-  heroCard: { width: "100%", height: 200, borderRadius: 24, overflow: "hidden", marginBottom: 20, elevation: 5, shadowColor: "#0284c7", shadowOpacity: 0.3, shadowRadius: 10, shadowOffset: { width: 0, height: 5 } },
+  heroCard: { width: "100%", height: 200, borderRadius: 24, overflow: "hidden", marginBottom: 20, elevation: 5, boxShadow: "0px 5px 10px rgba(2,132,199,0.3)" },
   celestial: { position: "absolute", right: 16, top: 16 },
   heroStats: { position: "absolute", top: 16, left: 16 },
   heroStatsLabel: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontWeight: "bold", textTransform: "uppercase" },
@@ -868,7 +878,7 @@ const styles = StyleSheet.create({
   heroHoursLabel: { fontSize: 10, fontWeight: "700", color: "rgba(255,255,255,0.75)", marginRight: 5, textTransform: "uppercase" },
   heroHoursValue: { fontSize: 13, fontWeight: "900", color: "#ffffff", letterSpacing: 0.5 },
 
-  card: { padding: 20, borderRadius: 24, borderWidth: 1, marginBottom: 20, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
+  card: { padding: 20, borderRadius: 24, borderWidth: 1, marginBottom: 20, elevation: 2, boxShadow: "0px 2px 5px rgba(0,0,0,0.05)" },
   cardHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 20 },
   targetIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   cardTitle: { fontSize: 16, fontWeight: "900" },
@@ -890,7 +900,7 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.5)" },
   dotActive: { width: 24, backgroundColor: "#fff" },
 
-  weeklyCard: { padding: 20, borderRadius: 24, marginBottom: 20, shadowColor: '#0284C7', shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 5 },
+  weeklyCard: { padding: 20, borderRadius: 24, marginBottom: 20, elevation: 5, boxShadow: '0px 5px 10px rgba(2,132,199,0.25)' },
   weeklyTitle: { color: "#fff", fontSize: 16, fontWeight: "900" },
   weeklySub: { color: "rgba(255,255,255,0.9)", fontSize: 12 },
   weeklyBarBg: { height: 10, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 5, marginBottom: 12 },
@@ -898,11 +908,11 @@ const styles = StyleSheet.create({
   weeklyText: { color: "#fff", fontSize: 14, fontWeight: "600" },
 
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center" },
-  offlineModalContent: { width: "85%", maxWidth: 360, padding: 24, borderRadius: 32, alignItems: "center", shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 20, elevation: 15 },
+  offlineModalContent: { width: "85%", maxWidth: 360, padding: 24, borderRadius: 32, alignItems: "center", elevation: 15, boxShadow: "0px 8px 20px rgba(0,0,0,0.25)" },
   offlineIconBox: { width: 64, height: 64, borderRadius: 32, backgroundColor: "#FEE2E2", justifyContent: "center", alignItems: "center", marginBottom: 16 },
   offlineTitle: { fontSize: 24, fontWeight: "bold", marginBottom: 8, textAlign: "center" },
   offlineSub: { fontSize: 14, color: "#64748B", textAlign: "center", lineHeight: 22 },
-  stayOnlineBtn: { width: "100%", backgroundColor: "#0284C7", paddingVertical: 16, borderRadius: 16, alignItems: "center", shadowColor: "#0284C7", shadowOpacity: 0.3, shadowRadius: 10, elevation: 5 },
+  stayOnlineBtn: { width: "100%", backgroundColor: "#0284C7", paddingVertical: 16, borderRadius: 16, alignItems: "center", elevation: 5, boxShadow: "0px 5px 10px rgba(2,132,199,0.3)" },
   stayOnlineText: { color: "#FFF", fontWeight: "bold", fontSize: 16 },
   goOfflineBtn: { width: "100%", paddingVertical: 16, borderRadius: 16, alignItems: "center", borderWidth: 2, borderColor: "#FECACA" },
   goOfflineText: { color: "#EF4444", fontWeight: "bold", fontSize: 16 },
@@ -913,7 +923,7 @@ const styles = StyleSheet.create({
   langBtnText: { fontSize: 16, fontWeight: "bold" },
 
   notifOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "flex-end", paddingTop: Platform.OS === "ios" ? 50 : 20 },
-  notifPanel: { width: "85%", maxWidth: 360, height: "100%", borderTopLeftRadius: 24, borderBottomLeftRadius: 24, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 20, elevation: 10 },
+  notifPanel: { width: "85%", maxWidth: 360, height: "100%", borderTopLeftRadius: 24, borderBottomLeftRadius: 24, elevation: 10, boxShadow: "0px 10px 20px rgba(0,0,0,0.2)" },
   notifHeader: { flexDirection: "row", justifyContent: "space-between", padding: 16, borderBottomWidth: 1 },
   notifTitle: { fontSize: 18, fontWeight: "bold" },
   alertBox: { flexDirection: "row", padding: 12, borderRadius: 16, borderWidth: 1, marginBottom: 12 },
@@ -922,19 +932,19 @@ const styles = StyleSheet.create({
   alertSub: { fontSize: 12, color: "#64748B", marginTop: 4 },
 
   modalOverlayRight: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", flexDirection: "row", justifyContent: "flex-end" },
-  drawerContent: { width: "85%", maxWidth: 400, height: "100%", backgroundColor: "#fff", borderTopLeftRadius: 32, borderBottomLeftRadius: 32, padding: 24, paddingTop: Platform.OS === "ios" ? 50 : 24, shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 20, elevation: 20 },
+  drawerContent: { width: "85%", maxWidth: 400, height: "100%", backgroundColor: "#fff", borderTopLeftRadius: 32, borderBottomLeftRadius: 32, padding: 24, paddingTop: Platform.OS === "ios" ? 50 : 24, elevation: 20, boxShadow: "0px 10px 20px rgba(0,0,0,0.3)" },
   closeBtn: { position: "absolute", top: Platform.OS === "ios" ? 50 : 24, right: 24, zIndex: 10, width: 40, height: 40, backgroundColor: "#F1F5F9", borderRadius: 20, alignItems: "center", justifyContent: "center" },
 
   loadingView: { flex: 1, justifyContent: "center", alignItems: "center" },
   loadingText: { color: "#64748B", fontWeight: "bold", marginTop: 16 },
 
   popupHeader: { alignItems: "center", marginBottom: 20, marginTop: 20 },
-  orderIconBox: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center", marginBottom: 16, shadowColor: "#0284C7", shadowOpacity: 0.4, shadowRadius: 10, elevation: 5 },
+  orderIconBox: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center", marginBottom: 16, elevation: 5, boxShadow: "0px 5px 10px rgba(2,132,199,0.4)" },
   orderPopupTitle: { fontSize: 24, fontWeight: "900", color: "#0F172A", marginBottom: 8 },
 
   statusRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", marginBottom: 12 },
   statusLabelText: { fontSize: 14, color: "#64748B" },
-  primeBadge: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginLeft: 8, shadowColor: "#F59E0B", shadowOpacity: 0.3, shadowRadius: 5, elevation: 3 },
+  primeBadge: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginLeft: 8, elevation: 3, boxShadow: "0px 2px 5px rgba(245,158,11,0.3)" },
   primeBadgeText: { color: "#fff", fontSize: 12, fontWeight: "bold" },
   normalBadge: { backgroundColor: "#E2E8F0", paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginLeft: 8 },
   normalBadgeText: { color: "#475569", fontSize: 12, fontWeight: "bold" },
@@ -961,7 +971,7 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
   declineBtn: { flex: 1, paddingVertical: 16, borderRadius: 16, borderWidth: 2, borderColor: "#FECACA", alignItems: "center", flexDirection: "row", justifyContent: "center", backgroundColor: "#FFF" },
   declineText: { color: "#DC2626", fontWeight: "bold", fontSize: 16 },
-  acceptBtn: { paddingVertical: 18, borderRadius: 16, alignItems: "center", flexDirection: "row", justifyContent: "center", shadowColor: "#22C55E", shadowOpacity: 0.4, shadowRadius: 10, elevation: 5 },
+  acceptBtn: { paddingVertical: 18, borderRadius: 16, alignItems: "center", flexDirection: "row", justifyContent: "center", elevation: 5, boxShadow: "0px 5px 10px rgba(34,197,94,0.4)" },
   acceptText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
 });
 

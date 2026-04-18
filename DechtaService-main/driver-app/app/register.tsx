@@ -161,24 +161,20 @@ export default function RegisterScreen() {
       return;
     }
 
-    // Documents are optional during registration on web (no camera access)
-    // They can be uploaded later from Profile > Documents
-    // On native app, validate if any document was partially uploaded
-    if (Platform.OS !== 'web') {
-      const docValidation = [
-        { name: 'Aadhaar Card',    data: regData.aadharFile },
-        { name: 'PAN Card',        data: regData.panFile },
-        { name: 'Driving License', data: regData.licenseFile },
-        { name: 'RC Book',         data: regData.rcFile },
-      ];
-      const incompleteDocuments = docValidation
-        .filter(doc => doc.data.front && !doc.data.back || !doc.data.front && doc.data.back)
-        .map(d => `• ${d.name} (only one side uploaded)`);
-      if (incompleteDocuments.length > 0) {
-        Alert.alert('Incomplete Documents',
-          `Please upload both sides for:\n\n${incompleteDocuments.join('\n')}`);
-        return;
-      }
+    // Validate if any document was partially uploaded.
+    const docValidation = [
+      { name: 'Aadhaar Card',    data: regData.aadharFile },
+      { name: 'PAN Card',        data: regData.panFile },
+      { name: 'Driving License', data: regData.licenseFile },
+      { name: 'RC Book',         data: regData.rcFile },
+    ];
+    const incompleteDocuments = docValidation
+      .filter(doc => (doc.data.front && !doc.data.back) || (!doc.data.front && doc.data.back))
+      .map(d => `• ${d.name} (only one side uploaded)`);
+    if (incompleteDocuments.length > 0) {
+      Alert.alert('Incomplete Documents',
+        `Please upload both sides for:\n\n${incompleteDocuments.join('\n')}`);
+      return;
     }
 
     setLoading(true);
@@ -193,26 +189,23 @@ export default function RegisterScreen() {
       }
 
       // 2. Upload KYC documents (both front and back)
-      // On web this step is optional and skipped to avoid blocking registration.
-      if (Platform.OS !== 'web') {
-        const docUploads = [
-          { key: 'aadharFile', type: 'aadhar', data: regData.aadharFile },
-          { key: 'panFile', type: 'pan', data: regData.panFile },
-          { key: 'licenseFile', type: 'license', data: regData.licenseFile },
-          { key: 'rcFile', type: 'rc', data: regData.rcFile },
-        ];
+      const docUploads = [
+        { key: 'aadharFile', type: 'aadhar', data: regData.aadharFile },
+        { key: 'panFile', type: 'pan', data: regData.panFile },
+        { key: 'licenseFile', type: 'license', data: regData.licenseFile },
+        { key: 'rcFile', type: 'rc', data: regData.rcFile },
+      ];
 
-        for (const doc of docUploads) {
-          if (doc.data.front || doc.data.back) {
-            try {
-              // Send both front and back images
-              await DriverAPI.uploadDocument(
-                [doc.data.front, doc.data.back],
-                doc.type
-              );
-            } catch (e) {
-              console.warn(`${doc.type} upload failed:`, e);
-            }
+      for (const doc of docUploads) {
+        if (doc.data.front || doc.data.back) {
+          try {
+            // Send both front and back images
+            await DriverAPI.uploadDocument(
+              [doc.data.front, doc.data.back],
+              doc.type
+            );
+          } catch (e) {
+            console.warn(`${doc.type} upload failed:`, e);
           }
         }
       }
@@ -530,7 +523,7 @@ export default function RegisterScreen() {
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
               {[
                 { key: 'aadharFile', label: 'Aadhaar Card', icon: 'credit-card' },
-                { key: 'panFile', label: 'PAN Card', icon: 'card' },
+                { key: 'panFile', label: 'PAN Card', icon: 'credit-card' },
                 { key: 'licenseFile', label: 'License', icon: 'smartphone' },
                 { key: 'rcFile', label: 'RC Book', icon: 'file-text' }
               ].map(doc => {
