@@ -196,7 +196,6 @@ export default function OrdersScreen() {
 
   const [cancelReason, setCancelReason] = useState('');
   const [otpInput, setOtpInput]         = useState('');
-  const [demoOtp, setDemoOtp]           = useState('');   // generated on arrive-at-dropoff
   const [packagePhoto, setPackagePhoto] = useState<string | null>(null);
 
   // ── Computed GPS coords from active trip (real Supabase data) ────────
@@ -254,8 +253,8 @@ export default function OrdersScreen() {
           type: o.product_name || o.order_type || 'Delivery',
           vehicle_type: o.vehicle_type ? String(o.vehicle_type).trim() : 'Unknown',
           payout: o.delivery_fee || o.total_amount || 0,
-          distance: o.distance_text || 'Calculating...',
-          pickup: o.vendor_shop_name || o.pickup_address || 'Pickup',
+          distance: o.distance_text || '',
+          pickup: o.pickup_address || o.vendor_shop_name || 'Pickup',
           drop: o.delivery_address || o.client_address || 'Drop',
           pickup_lat: o.pickup_latitude,
           pickup_lng: o.pickup_longitude,
@@ -493,45 +492,24 @@ export default function OrdersScreen() {
       try {
         const tripId = activeTrip?.tripId || activeTrip?.id;
         if (tripId) {
-          const result = await OrdersAPI.arrivedDropoff(tripId);
-          // In mock mode the backend returns the real delivery OTP so driver can test
-          // In production this is sent via SMS to the customer
-          if (result?.otp_for_testing) {
-            setDemoOtp(result.otp_for_testing);  // real OTP from orders.delivery_otp
-          } else {
-            // Production: OTP was SMS'd to customer — driver must ask customer for it
-            setDemoOtp('');
-          }
+          await OrdersAPI.arrivedDropoff(tripId);
         }
-      } catch {
-        setDemoOtp('');
-      }
+      } catch {}
       setOtpInput('');
       setActiveTrip({ ...activeTrip, step: 2 });
     }
   };
 
   // ── OTP Verification ─────────────────────────────────────────────────
-  // Step 1: validate against the demo OTP generated on arrive-at-dropoff.
-  //         This simulates the customer giving their PIN to the driver.
-  // Step 2: call the real backend API — backend remains unchanged.
+  // Driver must enter OTP provided by customer from the client app/SMS.
+  // Verification always happens on backend.
   const handleVerifyOtp = async () => {
     if (otpInput.length !== 4) {
-      Alert.alert('Invalid PIN', 'Please enter the 4-digit OTP shown on the customer screen.');
-      return;
-    }
-
-    // ── Local pre-check in mock mode — avoids unnecessary backend round-trip ──
-    // demoOtp is the REAL delivery OTP returned by arrivedDropoff (mock mode only)
-    // In production demoOtp is '' so this check is skipped
-    if (demoOtp && otpInput !== demoOtp) {
-      if (Platform.OS === 'web') { window.alert('Wrong PIN\n\nThe PIN you entered does not match. Please check with the customer.'); }
-      else { Alert.alert('Wrong PIN', 'The PIN you entered does not match. Please check with the customer.'); }
+      Alert.alert('Invalid PIN', 'Please enter the 4-digit OTP provided by the customer.');
       setOtpInput('');
       return;
     }
 
-    // ── Call real backend ─────────────────────────────────────────────────
     try {
       const tripId = activeTrip?.tripId || activeTrip?.id;
       const result = await OrdersAPI.complete(tripId, otpInput);
@@ -551,7 +529,6 @@ export default function OrdersScreen() {
         setAvailableOrders(prev => prev.filter(o => o.id !== activeTrip?.id));
         setActiveTrip(null);
         setOtpInput('');
-        setDemoOtp('');
         setTab('history');
         setHistoryFilter('Completed');
         fetchHistory('Completed');
@@ -560,30 +537,8 @@ export default function OrdersScreen() {
         setOtpInput('');
       }
     } catch (err: any) {
-      // If backend is unreachable but local OTP matched — complete locally so driver is not stuck
-      if (demoOtp && otpInput === demoOtp) {
-        const earned = activeTrip?.payout || 0;
-        Alert.alert(
-          '🎉 Delivery Completed!',
-          `₹${earned} has been added to your Wallet.
-(Synced offline — will update when reconnected.)`,
-          [{ text: 'Great!', style: 'default' }]
-        );
-        setHistoryOrders(prev => [
-          { ...(activeTrip || {}), status: 'Completed', date: new Date().toLocaleDateString('en-IN') },
-          ...prev,
-        ]);
-        setAvailableOrders(prev => prev.filter(o => o.id !== activeTrip?.id));
-        setActiveTrip(null);
-        setOtpInput('');
-        setDemoOtp('');
-        setTab('history');
-        setHistoryFilter('Completed');
-        fetchHistory('Completed');
-      } else {
-        Alert.alert('Error', err.message || 'Verification failed. Please try again.');
-        setOtpInput('');
-      }
+      Alert.alert('Error', err.message || 'Verification failed. Please try again.');
+      setOtpInput('');
     }
   };
 
@@ -692,7 +647,7 @@ export default function OrdersScreen() {
                     </View>
                     <View style={{alignItems:'flex-end'}}>
                       <Text style={styles.orderPayout}>₹{order.payout}</Text>
-                      <Text style={styles.orderDist}>{order.distance}</Text>
+                      {!!order.distance && <Text style={styles.orderDist}>{order.distance}</Text>}
                     </View>
                   </View>
                   <View style={styles.addressRow}>
@@ -945,23 +900,7 @@ export default function OrdersScreen() {
               <View style={styles.otpSection}>
                 <View style={styles.otpIconBox}><Feather name="key" size={32} color="#0284C7"/></View>
                 <Text style={styles.otpTitle}>Complete Delivery</Text>
-                <Text style={styles.otpSub}>Share the PIN below with your customer. They confirm, then tell it back to you.</Text>
-
-                {/* ── DEMO OTP DISPLAY ─────────────────────────────────────
-                    Shows the generated PIN so the driver can share it with
-                    the customer to simulate the SMS verification flow.
-                    In production: the customer receives this OTP via SMS.
-                ─────────────────────────────────────────────────────────── */}
-                {demoOtp ? (
-                  <View style={styles.demoOtpBox}>
-                    <View style={styles.demoOtpTop}>
-                      <Feather name="smartphone" size={14} color="#0284C7" style={{marginRight:6}}/>
-                      <Text style={styles.demoOtpLabel}>Customer PIN (share this)</Text>
-                    </View>
-                    <Text style={styles.demoOtpCode}>{demoOtp}</Text>
-                    <Text style={styles.demoOtpHint}>Ask the customer to read this back to you</Text>
-                  </View>
-                ) : null}
+                <Text style={styles.otpSub}>Ask customer to open the client app and share the delivery OTP.</Text>
 
                 <TextInput
                   style={styles.otpInput}

@@ -880,13 +880,9 @@ async function arrivedAtDropoff(request, reply) {
       { id: tripId, driver_id: driverId }
     );
 
-    // Get OTP from either delivery_trips or orders table
-    const otp = trip.delivery_otp || trip.order_delivery_otp;
-    
     return reply.send({
       success: true,
       message: 'OTP sent to customer. Ask customer for the 4-digit PIN.',
-      ...(process.env.OTP_PROVIDER === 'mock' && { otp_for_testing: otp }),
     });
   } catch (error) {
     request.log.error(error);

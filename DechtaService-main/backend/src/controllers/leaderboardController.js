@@ -6,6 +6,19 @@ async function tableExists(tableName) {
   return !!result.rows[0]?.table_name;
 }
 
+async function tableHasColumn(tableName, columnName) {
+  const result = await db.query(
+    `SELECT 1
+       FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = $1
+        AND column_name = $2
+      LIMIT 1`,
+    [tableName, columnName]
+  );
+  return result.rows.length > 0;
+}
+
 function isSchemaDriftError(error) {
   const msg = String(error?.message || '').toLowerCase();
   return msg.includes('relation') && msg.includes('does not exist')
@@ -122,11 +135,24 @@ async function getPromoSlides(request, reply) {
       return reply.send({ success: true, data: [] });
     }
 
-    const data = await db.selectMany(
-      'driver_ads',
-      { is_active: true },
-      { orderBy: 'display_order ASC' }
-    );
+    const hasIsActive = await tableHasColumn('driver_ads', 'is_active');
+    const hasDisplayOrder = await tableHasColumn('driver_ads', 'display_order');
+
+    let query = 'SELECT * FROM driver_ads';
+    const values = [];
+
+    if (hasIsActive) {
+      query += ' WHERE COALESCE(is_active, true) = true';
+    }
+
+    if (hasDisplayOrder) {
+      query += ' ORDER BY display_order ASC, id ASC';
+    } else {
+      query += ' ORDER BY created_at DESC, id DESC';
+    }
+
+    const result = await db.query(query, values);
+    const data = result.rows || [];
 
     return reply.send({ success: true, data: data || [] });
   } catch (error) {

@@ -720,6 +720,7 @@ const getMyOrders = asyncHandler(async (req, res) => {
     `SELECT
        o.id,
        o.status,
+       o.delivery_otp,
        COALESCE(
          o.final_total,
          o.final_amount + COALESCE(o.delivery_fee, 0) + COALESCE(o.tip_amount, 0),
@@ -741,6 +742,7 @@ const getMyOrders = asyncHandler(async (req, res) => {
   const mapped = rows.map((r) => ({
     id: r.id,
     status: STATUS_LABELS[String(r.status || '').toLowerCase()] || 'Placed',
+    deliveryOtp: r.delivery_otp || null,
     total: Number(r.total || 0),
     date: new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
     time: new Date(r.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),

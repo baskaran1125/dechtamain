@@ -87,6 +87,8 @@ export default function BookingsView({ isPage = false, onBack }) {
                         const displayStatus = statusMap[b.status] || b.status;
                         const currentStepIdx = steps.indexOf(displayStatus) === -1 ? 0 : steps.indexOf(displayStatus);
                         const step = currentStepIdx + 1;
+                        const hasDeliveryOtp = Boolean(b.deliveryOtp || b.delivery_otp);
+                        const deliveryOtp = b.deliveryOtp || b.delivery_otp || '';
 
                         return (
                             <div key={b.id} className="p-5 border-b border-gray-100 dark:border-slate-800 last:border-0 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors bg-white dark:bg-slate-900 rounded-xl mb-3 shadow-sm mx-2">
@@ -201,10 +203,16 @@ export default function BookingsView({ isPage = false, onBack }) {
                                                     updateBookingStatus(b.id, nextStatus);
                                                     showToast(`Order status updated to ${nextStatus}`);
                                                 }} className="flex-1 py-2.5 bg-black dark:bg-white text-white dark:text-black rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-transform active:scale-95">Next Step (Demo)</button>
-                                                <div className="relative flex-1 h-[36px] overflow-hidden rounded-lg shadow-lg shadow-cyan-500/20 group">
-                                                    <div className="absolute inset-0 bg-gray-100 dark:bg-slate-800 flex items-center justify-center gap-2 font-mono font-bold text-lg tracking-widest text-slate-900 dark:text-white border border-gray-200 dark:border-slate-700 rounded-lg"><Unlock className="w-4 h-4 text-green-500" /> 1234</div>
-                                                    <button onClick={() => handleRevealOTP(b.id)} className={`absolute inset-0 bg-cyan-500 hover:bg-cyan-600 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all duration-700 ease-out z-10 ${revealedOTPs[b.id] ? 'translate-x-full opacity-0 pointer-events-none' : 'translate-x-0 opacity-100'}`}><Lock className="w-3 h-3" /> Show Delivery OTP</button>
-                                                </div>
+                                                {hasDeliveryOtp ? (
+                                                    <div className="relative flex-1 h-[36px] overflow-hidden rounded-lg shadow-lg shadow-cyan-500/20 group">
+                                                        <div className="absolute inset-0 bg-gray-100 dark:bg-slate-800 flex items-center justify-center gap-2 font-mono font-bold text-lg tracking-widest text-slate-900 dark:text-white border border-gray-200 dark:border-slate-700 rounded-lg"><Unlock className="w-4 h-4 text-green-500" /> {deliveryOtp}</div>
+                                                        <button onClick={() => handleRevealOTP(b.id)} className={`absolute inset-0 bg-cyan-500 hover:bg-cyan-600 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all duration-700 ease-out z-10 ${revealedOTPs[b.id] ? 'translate-x-full opacity-0 pointer-events-none' : 'translate-x-0 opacity-100'}`}><Lock className="w-3 h-3" /> Show Delivery OTP</button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex-1 h-[36px] rounded-lg border border-dashed border-gray-300 dark:border-slate-700 text-[10px] font-bold text-gray-500 dark:text-gray-300 flex items-center justify-center px-2 text-center">
+                                                        Delivery OTP will appear when your order is out for delivery
+                                                    </div>
+                                                )}
                                             </>
                                         ) : (
                                             <button onClick={() => showToast('Feedback submitted!')} className="flex-1 py-2.5 bg-gray-100 dark:bg-slate-800 rounded-lg text-xs font-bold dark:text-white flex items-center justify-center gap-2"><Star className="w-3 h-3" /> Submit Feedback</button>
